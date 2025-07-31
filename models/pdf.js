@@ -4,9 +4,13 @@ const pdfSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
   creatorName: { type: String, required: true },
-  filePath: { type: String, required: true },
+  fileData: { type: Buffer, required: true },
+  fileName: { type: String, required: true },
+  mimeType: { type: String, required: true },
   uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   createdAt: { type: Date, default: Date.now }
 });
 
-export default mongoose.model('PDF', pdfSchema);
+const PDF = mongoose.model('PDF', pdfSchema);
+
+export default PDF;
