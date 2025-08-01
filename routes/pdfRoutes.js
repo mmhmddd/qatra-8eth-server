@@ -30,15 +30,18 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
     if (!req.file) {
       return res.status(400).json({ message: 'يرجى اختيار ملف PDF للرفع' });
     }
-    const { title, description, creatorName } = req.body;
-    if (!title || !description || !creatorName) {
-      return res.status(400).json({ message: 'العنوان، الوصف، واسم المنشئ مطلوبة' });
+    const { title, description, creatorName, subject, semester, academicLevel } = req.body;
+    if (!title || !description || !creatorName || !subject || !semester || !academicLevel) {
+      return res.status(400).json({ message: 'العنوان، الوصف، اسم المنشئ، المادة، الفصل الدراسي، والمرحلة الدراسية مطلوبة' });
     }
 
     const pdf = new PDF({
       title,
       description,
       creatorName,
+      subject,
+      semester,
+      academicLevel, 
       fileData: req.file.buffer,
       fileName: req.file.originalname,
       mimeType: req.file.mimetype,
@@ -53,6 +56,9 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
         title: pdf.title,
         description: pdf.description,
         creatorName: pdf.creatorName,
+        subject: pdf.subject,
+        semester: pdf.semester,
+        academicLevel: pdf.academicLevel, 
         fileName: pdf.fileName,
         uploadedBy: pdf.uploadedBy,
         createdAt: pdf.createdAt
@@ -76,6 +82,9 @@ router.get('/list', authMiddleware, async (req, res) => {
         title: pdf.title,
         description: pdf.description,
         creatorName: pdf.creatorName,
+        subject: pdf.subject,
+        semester: pdf.semester,
+        academicLevel: pdf.academicLevel, 
         fileName: pdf.fileName,
         uploadedBy: pdf.uploadedBy,
         createdAt: pdf.createdAt

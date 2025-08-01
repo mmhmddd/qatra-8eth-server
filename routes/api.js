@@ -8,6 +8,9 @@ import mongoose from 'mongoose';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import sendEmail from '../utils/email.js';
+import validator from 'validator'; // للتحقق من صحة البريد الإلكتروني
+import crypto from 'crypto'; // لتوليد كلمة مرور عشوائية أكثر أمانًا
 
 const router = express.Router();
 
@@ -52,7 +55,7 @@ const authMiddleware = (req, res, next) => {
     req.userId = decoded.userId;
     next();
   } catch (error) {
-    console.error('Error in token verification:', error);
+    console.error('خطأ في التحقق من الرمز:', error);
     res.status(401).json({ message: 'رمز غير صالح' });
   }
 };
@@ -67,6 +70,9 @@ router.post('/join-requests', async (req, res) => {
     if (!name || !email || !number || !academicSpecialization || !address) {
       return res.status(400).json({ message: 'الاسم، البريد الإلكتروني، الرقم، التخصص الجامعي، والعنوان مطلوبة' });
     }
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: 'البريد الإلكتروني غير صالح' });
+    }
 
     const existingRequest = await JoinRequest.findOne({ email });
     if (existingRequest) {
@@ -75,10 +81,10 @@ router.post('/join-requests', async (req, res) => {
 
     const joinRequest = new JoinRequest({ name, email, number, academicSpecialization, address, subjects });
     await joinRequest.save();
-    console.log('Join request created:', joinRequest);
+    console.log('تم إنشاء طلب الانضمام:', joinRequest);
     res.status(201).json({ message: 'تم تسجيل طلب الانضمام بنجاح', id: joinRequest._id });
   } catch (error) {
-    console.error('Error in submit join request:', error);
+    console.error('خطأ في تقديم طلب الانضمام:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -87,63 +93,112 @@ router.post('/join-requests', async (req, res) => {
 router.get('/join-requests', async (req, res) => {
   try {
     const joinRequests = await JoinRequest.find();
-    console.log('Join requests fetched:', joinRequests.length);
+    console.log('تم جلب طلبات الانضمام:', joinRequests.length);
     res.json(joinRequests);
   } catch (error) {
-    console.error('Error in get join requests:', error);
+    console.error('خطأ في جلب طلبات الانضمام:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
 
 // Approve a join request
-router.post('/join-requests/:id/approve', async (req, res) => {
+router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const joinRequest = await JoinRequest.findById(req.params.id);
+    // التحقق من متغيرات البيئة لإرسال البريد الإلكتروني
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: 'خطأ في إعدادات البريد الإلكتروني، تحقق من متغيرات البيئة' });
+    }
+
+    const joinRequest = await JoinRequest.findById(req.params.id).session(session);
     if (!joinRequest) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'الطلب غير موجود' });
     }
     if (joinRequest.status !== 'Pending') {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'الطلب تم معالجته مسبقًا' });
     }
 
+    // تحديث حالة الطلب
     joinRequest.status = 'Approved';
     joinRequest.volunteerHours = 0;
-    await joinRequest.save();
-    console.log('Join request approved:', joinRequest);
+    await joinRequest.save({ session });
+    console.log('تمت الموافقة على طلب الانضمام:', joinRequest);
 
-    const randomPassword = Math.random().toString(36).slice(-8);
-    const hashedPassword = await hash(randomPassword, 10);
-    console.log('Password hashed:', hashedPassword);
+    // التحقق من صحة البريد الإلكتروني
+    if (!validator.isEmail(joinRequest.email)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'البريد الإلكتروني للطلب غير صالح' });
+    }
 
-    const existingUser = await User.findOne({ email: joinRequest.email });
+    // التحقق من وجود المستخدم
+    const existingUser = await User.findOne({ email: joinRequest.email }).session(session);
     if (existingUser) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'حساب المستخدم موجود بالفعل' });
     }
 
-    const user = new User({ 
-      email: joinRequest.email, 
+    // توليد كلمة مرور عشوائية آمنة
+    const randomPassword = crypto.randomBytes(8).toString('hex');
+    console.log('كلمة المرور المولدة:', randomPassword);
+
+    // تشفير كلمة المرور
+    const hashedPassword = await hash(randomPassword, 10);
+    console.log('تم إنشاء كلمة المرور المشفرة');
+
+    // إنشاء حساب المستخدم
+    const user = new User({
+      email: joinRequest.email,
       password: hashedPassword,
       numberOfStudents: 0,
       subjects: joinRequest.subjects || [],
       students: [],
-      meetings: []
+      meetings: [],
+      role: 'user',
     });
-    await user.save();
-    console.log('User created:', user);
+    await user.save({ session });
+    console.log('تم إنشاء المستخدم:', user.email);
 
-    res.json({ 
-      message: 'تم الموافقة على الطلب وإنشاء الحساب', 
-      email: user.email, 
-      password: randomPassword
+    // إرسال البريد الإلكتروني مع كلمة المرور
+    try {
+      await sendEmail({
+        to: joinRequest.email,
+        subject: 'تم الموافقة على طلب الانضمام الخاص بك',
+        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
+      });
+      console.log('تم إرسال البريد الإلكتروني إلى:', joinRequest.email);
+    } catch (emailError) {
+      console.error('فشل إرسال البريد الإلكتروني:', emailError);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني', error: emailError.message });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      message: 'تم الموافقة على الطلب وإنشاء الحساب وإرسال كلمة المرور عبر البريد الإلكتروني',
+      email: user.email,
     });
   } catch (error) {
-    console.error('Error in approve join request:', error);
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    console.error('خطأ في الموافقة على طلب الانضمام:', error);
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ message: 'فشل في الموافقة على الطلب، تحقق من المعرف أو الاتصال بالخادم', error: error.message });
   }
 });
 
 // Reject a join request
-router.post('/join-requests/:id/reject', async (req, res) => {
+router.post('/join-requests/:id/reject', authMiddleware, async (req, res) => {
   try {
     const joinRequest = await JoinRequest.findById(req.params.id);
     if (!joinRequest) {
@@ -155,10 +210,10 @@ router.post('/join-requests/:id/reject', async (req, res) => {
 
     joinRequest.status = 'Rejected';
     await joinRequest.save();
-    console.log('Join request rejected:', joinRequest);
+    console.log('تم رفض طلب الانضمام:', joinRequest);
     res.json({ message: 'تم رفض الطلب' });
   } catch (error) {
-    console.error('Error in reject join request:', error);
+    console.error('خطأ في رفض طلب الانضمام:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -182,15 +237,15 @@ router.get('/approved-members', async (req, res) => {
         students: user?.students || []
       };
     }));
-    console.log('Approved members fetched:', membersWithDetails.length);
+    console.log('تم جلب الأعضاء المعتمدين:', membersWithDetails.length);
     res.json(membersWithDetails);
   } catch (error) {
-    console.error('Error in get approved members:', error);
+    console.error('خطأ في جلب الأعضاء المعتمدين:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
 
-// Get single member details
+// Get member details by ID
 router.get('/members/:id', async (req, res) => {
   try {
     const member = await JoinRequest.findById(req.params.id);
@@ -209,15 +264,16 @@ router.get('/members/:id', async (req, res) => {
       numberOfStudents: user?.numberOfStudents || 0,
       subjects: user?.subjects || [],
       students: user?.students || [],
-      password: user?.password || null
+      status: member.status,
+      createdAt: member.createdAt,
     });
   } catch (error) {
-    console.error('Error in get member details:', error);
+    console.error('خطأ في جلب تفاصيل العضو:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
 
-// Update member details (volunteer hours, number of students, students, subjects)
+// Update member details
 router.put('/members/:id/update-details', async (req, res) => {
   try {
     const { volunteerHours, numberOfStudents, students, subjects } = req.body;
@@ -252,7 +308,7 @@ router.put('/members/:id/update-details', async (req, res) => {
     user.subjects = subjects;
     await Promise.all([member.save(), user.save()]);
     
-    console.log('Member details updated:', { 
+    console.log('تم تحديث تفاصيل العضو:', { 
       memberId: member._id,
       volunteerHours, 
       numberOfStudents, 
@@ -267,7 +323,7 @@ router.put('/members/:id/update-details', async (req, res) => {
       subjects: user.subjects
     });
   } catch (error) {
-    console.error('Error in update member details:', error);
+    console.error('خطأ في تحديث تفاصيل العضو:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -278,6 +334,9 @@ router.post('/members/:id/add-student', async (req, res) => {
     const { name, email, phone } = req.body;
     if (!name || !email || !phone) {
       return res.status(400).json({ message: 'الاسم، البريد الإلكتروني، والهاتف مطلوبة للطالب' });
+    }
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: 'البريد الإلكتروني للطالب غير صالح' });
     }
 
     const member = await JoinRequest.findById(req.params.id);
@@ -313,7 +372,7 @@ router.post('/members/:id/add-student', async (req, res) => {
     user.numberOfStudents = (user.numberOfStudents || 0) + 1;
 
     await Promise.all([member.save(), user.save()]);
-    console.log('Student added:', { 
+    console.log('تم إضافة الطالب:', { 
       memberId: member._id, 
       student: newStudent, 
       numberOfStudents: user.numberOfStudents 
@@ -326,7 +385,7 @@ router.post('/members/:id/add-student', async (req, res) => {
       students: user.students
     });
   } catch (error) {
-    console.error('Error in add student:', error);
+    console.error('خطأ في إضافة الطالب:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -338,22 +397,30 @@ router.post('/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ message: 'البريد الإلكتروني وكلمة المرور مطلوبان' });
     }
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: 'البريد الإلكتروني غير صالح' });
+    }
 
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'بيانات تسجيل الدخول غير صحيحة' });
     }
 
+    // Compare hashed password
     const isMatch = await compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'بيانات تسجيل الدخول غير صحيحة' });
     }
 
-    const token = sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    console.log('Login successful for:', email);
+    const token = sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    console.log('تسجيل الدخول ناجح لـ:', email);
     res.json({ token });
   } catch (error) {
-    console.error('Error in login:', error);
+    console.error('خطأ في تسجيل الدخول:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -366,7 +433,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
     const joinRequest = await JoinRequest.findOne({ email: user.email });
-    console.log('Profile fetched:', {
+    console.log('تم جلب الملف الشخصي:', {
       userId: req.userId,
       numberOfStudents: user.numberOfStudents,
       students: user.students,
@@ -399,7 +466,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error in get profile:', error);
+    console.error('خطأ في جلب الملف الشخصي:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -420,6 +487,7 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
 
+    // Compare hashed password
     const isMatch = await compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'كلمة المرور الحالية غير صحيحة' });
@@ -429,7 +497,7 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'تم تحديث كلمة المرور بنجاح' });
   } catch (error) {
-    console.error('Error in update password:', error);
+    console.error('خطأ في تحديث كلمة المرور:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -446,19 +514,18 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
 
-    // Construct the full URL for the image
     const imagePath = `/Uploads/${req.file.filename}`;
     user.profileImage = imagePath;
     await user.save();
 
-    console.log('Profile image uploaded:', imagePath);
+    console.log('تم رفع الصورة الشخصية:', imagePath);
     res.json({
       success: true,
       message: 'تم رفع الصورة الشخصية بنجاح',
       data: { profileImage: imagePath }
     });
   } catch (error) {
-    console.error('Error uploading profile image:', error);
+    console.error('خطأ في رفع الصورة الشخصية:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -466,13 +533,11 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
 // Add a meeting to calendar
 router.post('/profile/meetings', authMiddleware, async (req, res) => {
   try {
-    console.log('Received POST /profile/meetings:', req.body);
     const { title, date, startTime, endTime } = req.body;
     if (!title || !date || !startTime || !endTime) {
       return res.status(400).json({ message: 'العنوان، التاريخ، وقت البدء، ووقت الانتهاء مطلوبة' });
     }
 
-    // Validate date format
     const parsedDate = new Date(date);
     if (isNaN(parsedDate.getTime())) {
       return res.status(400).json({ message: 'صيغة التاريخ غير صالحة، يجب أن تكون YYYY-MM-DD' });
@@ -485,14 +550,13 @@ router.post('/profile/meetings', authMiddleware, async (req, res) => {
 
     if (!Array.isArray(user.meetings)) {
       user.meetings = [];
-      console.log('Initialized user.meetings as empty array');
+      console.log('تم تهيئة مصفوفة المواعيد كمصفوفة فارغة');
     }
 
     user.meetings.push({ title, date: parsedDate, startTime, endTime });
     await user.save();
-    console.log('Meeting added:', user.meetings);
+    console.log('تم إضافة الموعد:', user.meetings);
 
-    // Format meetings for response
     const formattedMeetings = user.meetings.map(meeting => ({
       _id: meeting._id,
       title: meeting.title,
@@ -503,7 +567,7 @@ router.post('/profile/meetings', authMiddleware, async (req, res) => {
 
     res.json({ message: 'تم إضافة الموعد بنجاح', meetings: formattedMeetings });
   } catch (error) {
-    console.error('Error in add meeting:', error);
+    console.error('خطأ في إضافة الموعد:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -513,19 +577,16 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const { title, date, startTime, endTime } = req.body;
     const meetingId = req.params.meetingId;
-    console.log('Received PUT /profile/meetings:', { meetingId, ...req.body });
 
     if (!title || !date || !startTime || !endTime) {
       return res.status(400).json({ message: 'العنوان، التاريخ، وقت البدء، ووقت الانتهاء مطلوبة' });
     }
 
-    // Validate date format
     const parsedDate = new Date(date);
     if (isNaN(parsedDate.getTime())) {
       return res.status(400).json({ message: 'صيغة التاريخ غير صالحة، يجب أن تكون YYYY-MM-DD' });
     }
 
-    // Validate meetingId
     if (!mongoose.Types.ObjectId.isValid(meetingId)) {
       return res.status(400).json({ message: 'معرف الموعد غير صالح' });
     }
@@ -540,16 +601,14 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'الموعد غير موجود' });
     }
 
-    // Update meeting details
     meeting.title = title;
     meeting.date = parsedDate;
     meeting.startTime = startTime;
     meeting.endTime = endTime;
 
     await user.save();
-    console.log('Meeting updated:', user.meetings);
+    console.log('تم تحديث الموعد:', user.meetings);
 
-    // Format meetings for response
     const formattedMeetings = user.meetings.map(meeting => ({
       _id: meeting._id,
       title: meeting.title,
@@ -560,7 +619,7 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
 
     res.json({ message: 'تم تحديث الموعد بنجاح', meetings: formattedMeetings });
   } catch (error) {
-    console.error('Error in update meeting:', error);
+    console.error('خطأ في تحديث الموعد:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -569,9 +628,8 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
 router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const meetingId = req.params.meetingId;
-    console.log('Received DELETE /profile/meetings with ID:', meetingId);
+    console.log('تلقي طلب حذف موعد مع المعرف:', meetingId);
 
-    // Validate meetingId
     if (!mongoose.Types.ObjectId.isValid(meetingId)) {
       return res.status(400).json({ message: 'معرف الموعد غير صالح' });
     }
@@ -583,15 +641,14 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
 
     const meeting = user.meetings.id(meetingId);
     if (!meeting) {
-      console.log('Meeting not found for ID:', meetingId);
+      console.log('الموعد غير موجود للمعرف:', meetingId);
       return res.status(404).json({ message: 'الموعد غير موجود' });
     }
 
     user.meetings.pull(meetingId);
     await user.save();
-    console.log('Meeting deleted, updated meetings:', user.meetings);
+    console.log('تم حذف الموعد، المواعيد المحدثة:', user.meetings);
 
-    // Format meetings for response
     const formattedMeetings = user.meetings.map(meeting => ({
       _id: meeting._id,
       title: meeting.title,
@@ -602,7 +659,7 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
 
     res.json({ message: 'تم حذف الموعد بنجاح', meetings: formattedMeetings });
   } catch (error) {
-    console.error('Error in delete meeting:', error);
+    console.error('خطأ في حذف الموعد:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });

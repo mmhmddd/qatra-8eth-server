@@ -10,6 +10,12 @@ const userSchema = new Schema({
     type: String,
     required: true,
   },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user',
+    required: true,
+  },
   profileImage: {
     type: String,
     default: null,
@@ -29,7 +35,7 @@ const userSchema = new Schema({
     phone: { type: String, required: true }
   }],
   meetings: [{
-    _id: { type: Schema.Types.ObjectId, auto: true }, // التأكد من وجود _id
+    _id: { type: Schema.Types.ObjectId, auto: true },
     title: { type: String, required: true },
     date: { type: Date, required: true },
     startTime: { type: String, required: true },
