@@ -471,6 +471,8 @@ router.get('/profile', authMiddleware, async (req, res) => {
   }
 });
 
+
+
 // Update password
 router.put('/profile/password', authMiddleware, async (req, res) => {
   try {

@@ -8,13 +8,17 @@ const userSchema = new Schema({
   },
   password: {
     type: String,
-    required: true,
+    required: false, // Made optional for leaders added via leaderboard
   },
   role: {
     type: String,
-    enum: ['user', 'admin'],
+    enum: ['user', 'admin', 'leader'], // Added 'leader' to valid roles
     default: 'user',
     required: true,
+  },
+  name: {
+    type: String,
+    required: false, // Added to store leader's name
   },
   profileImage: {
     type: String,

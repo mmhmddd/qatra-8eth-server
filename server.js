@@ -7,6 +7,11 @@ import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
 
+// Import routes
+import leaderboardRoutes from './routes/leaderboard.js';
+import apiRoutes from './routes/api.js';
+import pdfRoutes from './routes/pdfRoutes.js';
+
 // Load environment variables
 config();
 
@@ -33,19 +38,20 @@ connect(process.env.MONGODB_URI, {
     process.exit(1);
   });
 
+// Create Express app
 const app = express();
 
-// Ensure Uploads directory exists
+// Setup directory info
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, 'Uploads');
 
-// Create Uploads directory if it doesn't exist
+// Ensure Uploads directory exists
 fs.mkdir(uploadDir, { recursive: true })
   .then(() => console.log('Uploads directory ready'))
   .catch(err => console.error('Error creating Uploads directory:', err));
 
-// Configure CORS
+// Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:4200',
   credentials: true
@@ -53,7 +59,7 @@ app.use(cors({
 
 app.use(json());
 
-// Configure multer for file uploads (for non-PDF routes, e.g., images)
+// Multer config
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -62,6 +68,7 @@ const storage = multer.diskStorage({
     cb(null, `${Date.now()}-${file.originalname}`);
   }
 });
+
 const upload = multer({ 
   storage,
   fileFilter: (req, file, cb) => {
@@ -76,24 +83,25 @@ const upload = multer({
   }
 });
 
-// Serve static files for uploaded files (for non-PDF routes)
+// Static files for uploads
 app.use('/Uploads', express.static(uploadDir));
 
-// Import and use routes
-import apiRoutes from './routes/api.js';
-import pdfRoutes from './routes/pdfRoutes.js';
+// Register routes
+console.log('Registering Leaderboard routes at /api/leaderboard');
+app.use('/api/leaderboard', leaderboardRoutes);
 
-// Debugging logs for route registration
 console.log('Registering API routes at /api');
 app.use('/api', apiRoutes);
+
 console.log('Registering PDF routes at /api/pdf');
 app.use('/api/pdf', pdfRoutes);
 
-// Handle unmatched routes
+// Fallback for unmatched routes
 app.use((req, res) => {
   console.log(`Unmatched route: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ message: `Cannot ${req.method} ${req.originalUrl}` });
 });
 
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
