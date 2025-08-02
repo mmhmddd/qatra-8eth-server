@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import leaderboardRoutes from './routes/leaderboard.js';
 import apiRoutes from './routes/api.js';
 import pdfRoutes from './routes/pdfRoutes.js';
+import testimonialsRoutes from './routes/testimonials.js';
 
 // Load environment variables
 config();
@@ -45,11 +46,15 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, 'Uploads');
+const testimonialsUploadDir = path.join(uploadDir, 'testimonials');
 
-// Ensure Uploads directory exists
+// Ensure Uploads and testimonials directories exist
 fs.mkdir(uploadDir, { recursive: true })
   .then(() => console.log('Uploads directory ready'))
   .catch(err => console.error('Error creating Uploads directory:', err));
+fs.mkdir(testimonialsUploadDir, { recursive: true })
+  .then(() => console.log('Testimonials Uploads directory ready'))
+  .catch(err => console.error('Error creating Testimonials Uploads directory:', err));
 
 // Middleware
 app.use(cors({
@@ -95,6 +100,9 @@ app.use('/api', apiRoutes);
 
 console.log('Registering PDF routes at /api/pdf');
 app.use('/api/pdf', pdfRoutes);
+
+console.log('Registering Testimonials routes at /api/testimonials');
+app.use('/api/testimonials', testimonialsRoutes);
 
 // Fallback for unmatched routes
 app.use((req, res) => {
