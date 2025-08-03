@@ -9,8 +9,8 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import sendEmail from '../utils/email.js';
-import validator from 'validator'; // للتحقق من صحة البريد الإلكتروني
-import crypto from 'crypto'; // لتوليد كلمة مرور عشوائية أكثر أمانًا
+import validator from 'validator';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -53,6 +53,7 @@ const authMiddleware = (req, res, next) => {
   try {
     const decoded = verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
+    req.userRole = decoded.role;
     next();
   } catch (error) {
     console.error('خطأ في التحقق من الرمز:', error);
@@ -106,7 +107,6 @@ router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    // التحقق من متغيرات البيئة لإرسال البريد الإلكتروني
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
       await session.abortTransaction();
       session.endSession();
@@ -125,20 +125,17 @@ router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'الطلب تم معالجته مسبقًا' });
     }
 
-    // تحديث حالة الطلب
     joinRequest.status = 'Approved';
     joinRequest.volunteerHours = 0;
     await joinRequest.save({ session });
     console.log('تمت الموافقة على طلب الانضمام:', joinRequest);
 
-    // التحقق من صحة البريد الإلكتروني
     if (!validator.isEmail(joinRequest.email)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: 'البريد الإلكتروني للطلب غير صالح' });
     }
 
-    // التحقق من وجود المستخدم
     const existingUser = await User.findOne({ email: joinRequest.email }).session(session);
     if (existingUser) {
       await session.abortTransaction();
@@ -146,15 +143,12 @@ router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'حساب المستخدم موجود بالفعل' });
     }
 
-    // توليد كلمة مرور عشوائية آمنة
     const randomPassword = crypto.randomBytes(8).toString('hex');
     console.log('كلمة المرور المولدة:', randomPassword);
 
-    // تشفير كلمة المرور
     const hashedPassword = await hash(randomPassword, 10);
     console.log('تم إنشاء كلمة المرور المشفرة');
 
-    // إنشاء حساب المستخدم
     const user = new User({
       email: joinRequest.email,
       password: hashedPassword,
@@ -162,12 +156,13 @@ router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
       subjects: joinRequest.subjects || [],
       students: [],
       meetings: [],
+      lectures: [],
+      lectureCount: 0,
       role: 'user',
     });
     await user.save({ session });
     console.log('تم إنشاء المستخدم:', user.email);
 
-    // إرسال البريد الإلكتروني مع كلمة المرور
     try {
       await sendEmail({
         to: joinRequest.email,
@@ -234,7 +229,9 @@ router.get('/approved-members', async (req, res) => {
         volunteerHours: member.volunteerHours || 0,
         numberOfStudents: user?.numberOfStudents || 0,
         subjects: user?.subjects || [],
-        students: user?.students || []
+        students: user?.students || [],
+        lectures: user?.lectures || [],
+        lectureCount: user?.lectureCount || 0
       };
     }));
     console.log('تم جلب الأعضاء المعتمدين:', membersWithDetails.length);
@@ -264,6 +261,8 @@ router.get('/members/:id', async (req, res) => {
       numberOfStudents: user?.numberOfStudents || 0,
       subjects: user?.subjects || [],
       students: user?.students || [],
+      lectures: user?.lectures || [],
+      lectureCount: user?.lectureCount || 0,
       status: member.status,
       createdAt: member.createdAt,
     });
@@ -352,7 +351,6 @@ router.post('/members/:id/add-student', async (req, res) => {
       return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
     }
 
-    // Initialize students array if undefined
     if (!Array.isArray(user.students)) {
       user.students = [];
     }
@@ -360,12 +358,10 @@ router.post('/members/:id/add-student', async (req, res) => {
       member.students = [];
     }
 
-    // Check for duplicate student email
     if (user.students.some(student => student.email === email)) {
       return res.status(400).json({ message: 'البريد الإلكتروني للطالب مستخدم بالفعل' });
     }
 
-    // Add new student
     const newStudent = { name, email, phone };
     user.students.push(newStudent);
     member.students.push(newStudent);
@@ -406,7 +402,6 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'بيانات تسجيل الدخول غير صحيحة' });
     }
 
-    // Compare hashed password
     const isMatch = await compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'بيانات تسجيل الدخول غير صحيحة' });
@@ -438,7 +433,9 @@ router.get('/profile', authMiddleware, async (req, res) => {
       numberOfStudents: user.numberOfStudents,
       students: user.students,
       subjects: user.subjects,
-      meetings: user.meetings
+      meetings: user.meetings,
+      lectures: user.lectures,
+      lectureCount: user.lectureCount
     });
     res.json({
       success: true,
@@ -451,7 +448,9 @@ router.get('/profile', authMiddleware, async (req, res) => {
           numberOfStudents: user.numberOfStudents || 0,
           subjects: user.subjects || [],
           students: user.students || [],
-          meetings: user.meetings || []
+          meetings: user.meetings || [],
+          lectures: user.lectures || [],
+          lectureCount: user.lectureCount || 0
         },
         joinRequest: joinRequest ? {
           name: joinRequest.name,
@@ -461,7 +460,9 @@ router.get('/profile', authMiddleware, async (req, res) => {
           volunteerHours: joinRequest.volunteerHours || 0,
           status: joinRequest.status,
           students: user.students || [],
-          subjects: user.subjects || []
+          subjects: user.subjects || [],
+          lectures: user.lectures || [],
+          lectureCount: user.lectureCount || 0
         } : null
       }
     });
@@ -470,8 +471,6 @@ router.get('/profile', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
-
-
 
 // Update password
 router.put('/profile/password', authMiddleware, async (req, res) => {
@@ -489,7 +488,6 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
 
-    // Compare hashed password
     const isMatch = await compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'كلمة المرور الحالية غير صحيحة' });

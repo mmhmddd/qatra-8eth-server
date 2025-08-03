@@ -8,17 +8,17 @@ const userSchema = new Schema({
   },
   password: {
     type: String,
-    required: false, // Made optional for leaders added via leaderboard
+    required: false,
   },
   role: {
     type: String,
-    enum: ['user', 'admin', 'leader'], // Added 'leader' to valid roles
+    enum: ['user', 'admin', 'leader'],
     default: 'user',
     required: true,
   },
   name: {
     type: String,
-    required: false, // Added to store leader's name
+    required: false,
   },
   profileImage: {
     type: String,
@@ -45,6 +45,15 @@ const userSchema = new Schema({
     startTime: { type: String, required: true },
     endTime: { type: String, required: true }
   }],
+  lectures: [{
+    link: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+  }],
+  lectureCount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now,

@@ -1,0 +1,28 @@
+import { Schema, model } from 'mongoose';
+
+const notificationSchema = new Schema({
+  userId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  message: {
+    type: String,
+    required: true
+  },
+  type: {
+    type: String,
+    enum: ['lecture_added', 'low_lecture_count'],
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  read: {
+    type: Boolean,
+    default: false
+  }
+});
+
+export default model('Notification', notificationSchema);

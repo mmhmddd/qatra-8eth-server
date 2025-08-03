@@ -12,6 +12,8 @@ import leaderboardRoutes from './routes/leaderboard.js';
 import apiRoutes from './routes/api.js';
 import pdfRoutes from './routes/pdfRoutes.js';
 import testimonialsRoutes from './routes/testimonials.js';
+import lectureRoutes from './routes/lectureRoutes.js';
+import galleryRoutes from './routes/gallery.js';
 
 // Load environment variables
 config();
@@ -47,14 +49,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, 'Uploads');
 const testimonialsUploadDir = path.join(uploadDir, 'testimonials');
+const galleryUploadDir = path.join(uploadDir, 'gallery');
 
-// Ensure Uploads and testimonials directories exist
+// Ensure Uploads, testimonials, and gallery directories exist
 fs.mkdir(uploadDir, { recursive: true })
   .then(() => console.log('Uploads directory ready'))
   .catch(err => console.error('Error creating Uploads directory:', err));
 fs.mkdir(testimonialsUploadDir, { recursive: true })
   .then(() => console.log('Testimonials Uploads directory ready'))
   .catch(err => console.error('Error creating Testimonials Uploads directory:', err));
+fs.mkdir(galleryUploadDir, { recursive: true })
+  .then(() => console.log('Gallery Uploads directory ready'))
+  .catch(err => console.error('Error creating Gallery Uploads directory:', err));
 
 // Middleware
 app.use(cors({
@@ -103,6 +109,12 @@ app.use('/api/pdf', pdfRoutes);
 
 console.log('Registering Testimonials routes at /api/testimonials');
 app.use('/api/testimonials', testimonialsRoutes);
+
+console.log('Registering Lecture routes at /api/lectures');
+app.use('/api/lectures', lectureRoutes);
+
+console.log('Registering Gallery routes at /api/gallery');
+app.use('/api/gallery', galleryRoutes);
 
 // Fallback for unmatched routes
 app.use((req, res) => {
