@@ -52,7 +52,15 @@ const userSchema = new Schema({
     createdAt: { type: Date, default: Date.now },
     _id: { type: Schema.Types.ObjectId, auto: true }
   }],
-  lectureCount: { type: Number, default: 0 }
+  lectureCount: { type: Number, default: 0 },
+  resetToken: {
+    type: String,
+    default: null
+  },
+  tokenExpire: {
+    type: Date,
+    default: null
+  }
 });
 
 export default model('User', userSchema);

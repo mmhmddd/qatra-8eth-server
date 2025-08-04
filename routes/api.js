@@ -645,7 +645,7 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
     }
 
     const meeting = user.meetings.id(meetingId);
-    if (!meeting) {
+    if (! fryer ){
       return res.status(404).json({ message: 'الموعد غير موجود' });
     }
 
@@ -708,6 +708,53 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
     res.json({ message: 'تم حذف الموعد بنجاح', meetings: formattedMeetings });
   } catch (error) {
     console.error('خطأ في حذف الموعد:', error);
+    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+  }
+});
+
+// Request password reset
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'البريد الإلكتروني مطلوب' });
+    }
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: 'البريد الإلكتروني غير صالح' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpire = Date.now() + 3600000; // 1 hour expiration
+
+    user.resetToken = resetToken;
+    user.tokenExpire = tokenExpire;
+    await user.save();
+
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password/${resetToken}`;
+    const message = `مرحبًا,\n\nلقد طلبت إعادة تعيين كلمة المرور. يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور الخاصة بك:\n${resetUrl}\n\nهذا الرابط صالح لمدة ساعة واحدة فقط.\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.\n\nتحياتنا,\nفريق الإدارة`;
+
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'إعادة تعيين كلمة المرور',
+        text: message,
+      });
+      console.log('تم إرسال بريد إلكتروني لإعادة تعيين كلمة المرور إلى:', email, 'مع الرابط:', resetUrl);
+      res.json({ message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' });
+    } catch (emailError) {
+      console.error('فشل إرسال بريد إلكتروني لإعادة تعيين كلمة المرور:', emailError);
+      user.resetToken = null;
+      user.tokenExpire = null;
+      await user.save();
+      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني', error: emailError.message });
+    }
+  } catch (error) {
+    console.error('خطأ في طلب إعادة تعيين كلمة المرور:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
