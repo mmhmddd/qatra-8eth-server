@@ -24,15 +24,23 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Add a lecture link
+// Add a lecture
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { link } = req.body;
-    if (!link) {
-      return res.status(400).json({ message: 'رابط المحاضرة مطلوب' });
+    const { link, name, subject } = req.body;
+    
+    // Validate inputs
+    if (!link || !name || !subject) {
+      return res.status(400).json({ message: 'رابط المحاضرة، الاسم، والمادة مطلوبة' });
     }
     if (!validator.isURL(link)) {
       return res.status(400).json({ message: 'رابط المحاضرة غير صالح' });
+    }
+    if (!validator.isLength(name, { min: 1, max: 100 })) {
+      return res.status(400).json({ message: 'اسم المحاضرة يجب أن يكون بين 1 و100 حرف' });
+    }
+    if (!validator.isLength(subject, { min: 1, max: 100 })) {
+      return res.status(400).json({ message: 'اسم المادة يجب أن يكون بين 1 و100 حرف' });
     }
 
     const user = await User.findById(req.userId);
@@ -44,15 +52,17 @@ router.post('/', authMiddleware, async (req, res) => {
       user.lectures = [];
     }
 
-    user.lectures.push({ link, createdAt: new Date() });
+    const lecture = { link, name, subject, createdAt: new Date() };
+    user.lectures.push(lecture);
     user.lectureCount = (user.lectureCount || 0) + 1;
     await user.save();
 
     // Create notification for admin
     const notification = new Notification({
       userId: req.userId,
-      message: `تمت إضافة محاضرة جديدة بواسطة ${user.email}: ${link}`,
-      type: 'lecture_added'
+      message: `تمت إضافة محاضرة جديدة بواسطة ${user.email}: ${name} (${subject}) - ${link}`,
+      type: 'lecture_added',
+      lectureDetails: { link, name, subject }
     });
     await notification.save();
 
@@ -65,17 +75,17 @@ router.post('/', authMiddleware, async (req, res) => {
         message: `تحذير: المستخدم ${user.email} قام برفع ${lectureCountThisMonth} محاضرة فقط هذا الشهر`,
         type: 'low_lecture_count'
       });
-      await warningNotification.save();
+      await warningNotification.save(); // Fixed: Save the warning notification
     }
 
-    console.log('تم إضافة رابط المحاضرة:', { userId: req.userId, link, lectureCount: user.lectureCount });
+    console.log('تم إضافة المحاضرة:', { userId: req.userId, link, name, subject, lectureCount: user.lectureCount });
     res.json({
-      message: 'تم إضافة رابط المحاضرة بنجاح',
-      lecture: { link, createdAt: new Date() },
+      message: 'تم إضافة المحاضرة بنجاح',
+      lecture,
       lectureCount: user.lectureCount
     });
   } catch (error) {
-    console.error('خطأ في إضافة رابط المحاضرة:', error);
+    console.error('خطأ في إضافة المحاضرة:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -132,7 +142,8 @@ router.get('/notifications', authMiddleware, async (req, res) => {
         message: notification.message,
         type: notification.type,
         createdAt: notification.createdAt.toISOString(),
-        read: notification.read
+        read: notification.read,
+        lectureDetails: notification.lectureDetails
       }))
     });
   } catch (error) {
@@ -167,7 +178,8 @@ router.post('/notifications/mark-read', authMiddleware, async (req, res) => {
         message: notification.message,
         type: notification.type,
         createdAt: notification.createdAt.toISOString(),
-        read: notification.read
+        read: notification.read,
+        lectureDetails: notification.lectureDetails
       }))
     });
   } catch (error) {

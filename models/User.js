@@ -47,17 +47,12 @@ const userSchema = new Schema({
   }],
   lectures: [{
     link: { type: String, required: true },
-    createdAt: { type: Date, default: Date.now }
+    name: { type: String, required: true },
+    subject: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    _id: { type: Schema.Types.ObjectId, auto: true }
   }],
-  lectureCount: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
+  lectureCount: { type: Number, default: 0 }
 });
 
 export default model('User', userSchema);

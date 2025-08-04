@@ -15,6 +15,11 @@ const notificationSchema = new Schema({
     enum: ['lecture_added', 'low_lecture_count'],
     required: true
   },
+  lectureDetails: {
+    link: { type: String },
+    name: { type: String },
+    subject: { type: String }
+  },
   createdAt: {
     type: Date,
     default: Date.now

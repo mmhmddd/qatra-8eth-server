@@ -25,7 +25,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    cb(null, uniqueSuffix + path.extname(file.originalName));
   }
 });
 
@@ -33,7 +33,7 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const extname = filetypes.test(path.extname(file.originalName).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
     if (extname && mimetype) {
       return cb(null, true);
@@ -209,6 +209,54 @@ router.post('/join-requests/:id/reject', authMiddleware, async (req, res) => {
     res.json({ message: 'تم رفض الطلب' });
   } catch (error) {
     console.error('خطأ في رفض طلب الانضمام:', error);
+    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+  }
+});
+
+// Delete an approved member
+router.delete('/members/:id', authMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const memberId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(memberId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'معرف العضو غير صالح' });
+    }
+
+    const joinRequest = await JoinRequest.findById(memberId).session(session);
+    if (!joinRequest) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'العضو غير موجود' });
+    }
+
+    if (joinRequest.status !== 'Approved') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'يجب أن يكون العضو قد تمت الموافقة عليه' });
+    }
+
+    const user = await User.findOne({ email: joinRequest.email }).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
+    }
+
+    await JoinRequest.deleteOne({ _id: memberId }).session(session);
+    await User.deleteOne({ email: joinRequest.email }).session(session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log('تم حذف العضو:', { memberId, email: joinRequest.email });
+    res.json({ message: 'تم حذف العضو بنجاح' });
+  } catch (error) {
+    console.error('خطأ في حذف العضو:', error);
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
