@@ -5,8 +5,6 @@ import Notification from '../models/Notification.js';
 import validator from 'validator';
 import mongoose from 'mongoose';
 
-const { verify } = jwt;
-
 const router = express.Router();
 
 // Middleware to verify JWT token
@@ -16,7 +14,7 @@ const authMiddleware = (req, res, next) => {
     return res.status(401).json({ message: 'الوصول مرفوض، يرجى تسجيل الدخول' });
   }
   try {
-    const decoded = verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
     req.userRole = decoded.role;
     next();
@@ -116,42 +114,69 @@ router.delete('/:lectureId', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all notifications (Admin only)
+// GET /api/lectures/notifications
 router.get('/notifications', authMiddleware, async (req, res) => {
   try {
-    if (req.userRole !== 'admin') {
-      return res.status(403).json({ message: 'يجب أن تكون أدمن لعرض الإشعارات' });
-    }
-
-    const notifications = await Notification.find().populate('userId', 'email');
-    console.log('تم جلب الإشعارات:', notifications.length);
-    res.json(notifications);
+    const notifications = await Notification.find({ userId: req.userId })
+      .populate('userId', 'email')
+      .sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      message: 'تم جلب الإشعارات بنجاح',
+      notifications: notifications.map(notification => ({
+        _id: notification._id.toString(),
+        userId: {
+          _id: notification.userId._id.toString(),
+          email: notification.userId.email
+        },
+        message: notification.message,
+        type: notification.type,
+        createdAt: notification.createdAt.toISOString(),
+        read: notification.read
+      }))
+    });
   } catch (error) {
-    console.error('خطأ في جلب الإشعارات:', error);
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في جلب الإشعارات',
+      error: error.message
+    });
   }
 });
 
-// Mark notification as read when viewing member profile
-router.post('/mark-notification-read', authMiddleware, async (req, res) => {
+// POST /api/lectures/notifications/mark-read
+router.post('/notifications/mark-read', authMiddleware, async (req, res) => {
   try {
-    const { memberId } = req.body;
-    if (!memberId) {
-      return res.status(400).json({ message: 'معرف العضو مطلوب' });
-    }
-
-    const notification = await Notification.findOne({ userId: memberId, type: 'lecture_added', read: false });
-    if (notification) {
-      notification.read = true;
-      await notification.save();
-      console.log('تم تحديث حالة الإشعار كمقروء:', { memberId });
-      res.json({ success: true, message: 'تم تحديث حالة الإشعار بنجاح' });
-    } else {
-      res.json({ success: true, message: 'لا يوجد إشعارات غير مقروءة' });
-    }
+    await Notification.updateMany(
+      { userId: req.userId, read: false },
+      { $set: { read: true } }
+    );
+    const notifications = await Notification.find({ userId: req.userId })
+      .populate('userId', 'email')
+      .sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      message: 'تم تحديد الإشعارات كمقروءة',
+      notifications: notifications.map(notification => ({
+        _id: notification._id.toString(),
+        userId: {
+          _id: notification.userId._id.toString(),
+          email: notification.userId.email
+        },
+        message: notification.message,
+        type: notification.type,
+        createdAt: notification.createdAt.toISOString(),
+        read: notification.read
+      }))
+    });
   } catch (error) {
-    console.error('خطأ في تحديث حالة الإشعار:', error);
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    console.error('Error marking notifications as read:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في تحديد الإشعارات كمقروءة',
+      error: error.message
+    });
   }
 });
 
