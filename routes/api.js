@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 import sendEmail from '../utils/email.js';
 import validator from 'validator';
 import crypto from 'crypto';
@@ -19,29 +20,47 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.join(__dirname, '../Uploads');
 
+// تأكد من وجود مجلد Uploads
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log('تم إنشاء مجلد Uploads:', uploadDir);
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
+    console.log('تحديد وجهة الملف:', uploadDir);
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
+    // تصحيح خطأ الخاصية originalName إلى originalname
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalName));
+    const filename = uniqueSuffix + path.extname(file.originalname);
+    console.log('اسم الملف المولد:', filename);
+    cb(null, filename);
   }
 });
 
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalName).toLowerCase());
+    console.log('فحص نوع الملف:', file.mimetype, file.originalname);
+    const filetypes = /jpeg|jpg|png|gif/;
+    // تصحيح originalName إلى originalname
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
+    
     if (extname && mimetype) {
+      console.log('نوع الملف مقبول');
       return cb(null, true);
     } else {
-      cb(new Error('يجب أن تكون الصورة بصيغة JPEG أو PNG'));
+      console.log('نوع الملف مرفوض');
+      cb(new Error('يجب أن تكون الصورة بصيغة JPEG، PNG، أو GIF'));
     }
   },
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { 
+    fileSize: 10 * 1024 * 1024, // زيادة الحد إلى 10MB
+    files: 1
+  }
 });
 
 // Middleware to verify JWT token
@@ -550,32 +569,106 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload profile image
-router.post('/profile/image', authMiddleware, upload.single('profileImage'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'يرجى اختيار صورة للرفع' });
+// Upload profile image - المسار المحسّن
+router.post('/profile/image', authMiddleware, (req, res) => {
+  console.log('تلقي طلب رفع صورة شخصية...');
+  
+  // استخدام middleware للـ multer مع معالجة الأخطاء
+  upload.single('profileImage')(req, res, async (err) => {
+    try {
+      // التحقق من أخطاء multer
+      if (err) {
+        console.error('خطأ في multer:', err.message);
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ 
+              success: false,
+              message: 'حجم الملف كبير جداً. الحد الأقصى هو 10MB' 
+            });
+          }
+        }
+        return res.status(400).json({ 
+          success: false,
+          message: err.message || 'خطأ في رفع الملف' 
+        });
+      }
+
+      // التحقق من وجود الملف
+      if (!req.file) {
+        console.log('لم يتم تلقي أي ملف');
+        return res.status(400).json({ 
+          success: false,
+          message: 'يرجى اختيار صورة للرفع' 
+        });
+      }
+
+      console.log('تم تلقي الملف:', req.file);
+
+      // البحث عن المستخدم
+      const user = await User.findById(req.userId);
+      if (!user) {
+        // حذف الملف إذا لم يتم العثور على المستخدم
+        try {
+          fs.unlinkSync(req.file.path);
+          console.log('تم حذف الملف بسبب عدم وجود المستخدم');
+        } catch (unlinkErr) {
+          console.error('خطأ في حذف الملف:', unlinkErr);
+        }
+        return res.status(404).json({ 
+          success: false,
+          message: 'المستخدم غير موجود' 
+        });
+      }
+
+      // حذف الصورة الشخصية السابقة إن وجدت
+      if (user.profileImage) {
+        const oldImagePath = path.join(__dirname, '..', user.profileImage);
+        try {
+          if (fs.existsSync(oldImagePath)) {
+            fs.unlinkSync(oldImagePath);
+            console.log('تم حذف الصورة القديمة:', oldImagePath);
+          }
+        } catch (unlinkErr) {
+          console.error('خطأ في حذف الصورة القديمة:', unlinkErr);
+        }
+      }
+
+      // حفظ مسار الصورة الجديدة
+      const imagePath = `/Uploads/${req.file.filename}`;
+      user.profileImage = imagePath;
+      await user.save();
+
+      console.log('تم رفع الصورة الشخصية بنجاح:', imagePath);
+      res.json({
+        success: true,
+        message: 'تم رفع الصورة الشخصية بنجاح',
+        data: { 
+          profileImage: imagePath,
+          fileName: req.file.filename,
+          fileSize: req.file.size
+        }
+      });
+
+    } catch (error) {
+      console.error('خطأ في رفع الصورة الشخصية:', error);
+      
+      // حذف الملف في حالة حدوث خطأ
+      if (req.file && req.file.path) {
+        try {
+          fs.unlinkSync(req.file.path);
+          console.log('تم حذف الملف بسبب حدوث خطأ');
+        } catch (unlinkErr) {
+          console.error('خطأ في حذف الملف:', unlinkErr);
+        }
+      }
+      
+      res.status(500).json({ 
+        success: false,
+        message: 'خطأ في الخادم أثناء رفع الصورة', 
+        error: error.message 
+      });
     }
-
-    const user = await User.findById(req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'المستخدم غير موجود' });
-    }
-
-    const imagePath = `/Uploads/${req.file.filename}`;
-    user.profileImage = imagePath;
-    await user.save();
-
-    console.log('تم رفع الصورة الشخصية:', imagePath);
-    res.json({
-      success: true,
-      message: 'تم رفع الصورة الشخصية بنجاح',
-      data: { profileImage: imagePath }
-    });
-  } catch (error) {
-    console.error('خطأ في رفع الصورة الشخصية:', error);
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
-  }
+  });
 });
 
 // Add a meeting to calendar
@@ -620,7 +713,7 @@ router.post('/profile/meetings', authMiddleware, async (req, res) => {
   }
 });
 
-// Update a meeting
+// Update a meeting - تم إصلاح خطأ المتغير fryer
 router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const { title, date, startTime, endTime } = req.body;
@@ -645,7 +738,7 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
     }
 
     const meeting = user.meetings.id(meetingId);
-    if (! fryer ){
+    if (!meeting) {  // تم تصحيح خطأ المتغير fryer إلى meeting
       return res.status(404).json({ message: 'الموعد غير موجود' });
     }
 

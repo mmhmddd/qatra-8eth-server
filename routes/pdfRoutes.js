@@ -7,18 +7,23 @@ import multer from 'multer';
 // Initialize router
 const router = express.Router();
 
+// Configure Multer for file uploads
 const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
   console.log('Multer file filter:', file.originalname, file.mimetype);
   const isValid = file.mimetype === 'application/pdf' && /\.pdf$/.test(file.originalname.toLowerCase());
   if (isValid) {
-    return cb(null, true);
+    cb(null, true);
   } else {
     cb(new Error('الملفات المسموح بها هي: PDF فقط'), false);
   }
 };
 
-const upload = multer({ storage, fileFilter });
+const upload = multer({ 
+  storage, 
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // Limit file size to 10MB
+});
 
 // Upload PDF
 router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res) => {
@@ -30,9 +35,9 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
     if (!req.file) {
       return res.status(400).json({ message: 'يرجى اختيار ملف PDF للرفع' });
     }
-    const { title, description, creatorName, subject, semester, academicLevel } = req.body;
-    if (!title || !description || !creatorName || !subject || !semester || !academicLevel) {
-      return res.status(400).json({ message: 'العنوان، الوصف، اسم المنشئ، المادة، الفصل الدراسي، والمرحلة الدراسية مطلوبة' });
+    const { title, description, creatorName, subject, semester, country, academicLevel } = req.body;
+    if (!title || !description || !creatorName || !subject || !semester || !country || !academicLevel) {
+      return res.status(400).json({ message: 'جميع الحقول (العنوان، الوصف، اسم المنشئ، المادة، الفصل الدراسي، الدولة، المرحلة الدراسية) مطلوبة' });
     }
 
     const pdf = new PDF({
@@ -41,7 +46,8 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
       creatorName,
       subject,
       semester,
-      academicLevel, 
+      country,
+      academicLevel,
       fileData: req.file.buffer,
       fileName: req.file.originalname,
       mimeType: req.file.mimetype,
@@ -58,14 +64,18 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
         creatorName: pdf.creatorName,
         subject: pdf.subject,
         semester: pdf.semester,
-        academicLevel: pdf.academicLevel, 
+        country: pdf.country,
+        academicLevel: pdf.academicLevel,
         fileName: pdf.fileName,
-        uploadedBy: pdf.uploadedBy,
+        uploadedBy: pdf.uploadedBy.toString(),
         createdAt: pdf.createdAt
       }
     });
   } catch (error) {
-    console.error('Upload PDF error:', error);
+    console.error('Upload PDF error:', {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
@@ -84,14 +94,18 @@ router.get('/list', authMiddleware, async (req, res) => {
         creatorName: pdf.creatorName,
         subject: pdf.subject,
         semester: pdf.semester,
-        academicLevel: pdf.academicLevel, 
+        country: pdf.country,
+        academicLevel: pdf.academicLevel,
         fileName: pdf.fileName,
-        uploadedBy: pdf.uploadedBy,
+        uploadedBy: pdf.uploadedBy.toString(),
         createdAt: pdf.createdAt
       }))
     });
   } catch (error) {
-    console.error('List PDFs error:', error);
+    console.error('List PDFs error:', {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({ message: 'خطأ في جلب الملفات', error: error.message });
   }
 });
@@ -137,7 +151,7 @@ router.get('/view/:id', authMiddleware, async (req, res) => {
 
     res.set({
       'Content-Type': pdf.mimeType,
-      'Content-Disposition': `inline; filename="${pdf.fileName}"`
+      'Content-Disposition': `inline; filename="${encodeURIComponent(pdf.fileName)}"`
     });
     res.send(pdf.fileData);
   } catch (error) {
