@@ -81,34 +81,37 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
 });
 
 // List PDFs
-router.get('/list', authMiddleware, async (req, res) => {
-  console.log('GET /api/pdf/list called', { userId: req.userId });
+router.get('/list', async (req, res) => {
   try {
-    const pdfs = await PDF.find({ uploadedBy: req.userId }).select('-fileData');
-    res.status(200).json({
-      message: 'تم جلب الملفات بنجاح',
-      pdfs: pdfs.map(pdf => ({
-        id: pdf._id.toString(),
-        title: pdf.title,
-        description: pdf.description,
-        creatorName: pdf.creatorName,
-        subject: pdf.subject,
-        semester: pdf.semester,
-        country: pdf.country,
-        academicLevel: pdf.academicLevel,
-        fileName: pdf.fileName,
-        uploadedBy: pdf.uploadedBy.toString(),
-        createdAt: pdf.createdAt
-      }))
+    const pdfs = await PDF.find()
+      .select('title description creatorName subject semester country academicLevel fileName uploadedBy createdAt')
+      .populate('uploadedBy', 'email'); // Optionally populate user email
+
+    // Map the PDFs to match the frontend Pdf interface
+    const pdfList = pdfs.map(pdf => ({
+      id: pdf._id.toString(),
+      title: pdf.title,
+      description: pdf.description,
+      creatorName: pdf.creatorName,
+      subject: pdf.subject,
+      semester: pdf.semester,
+      country: pdf.country,
+      academicLevel: pdf.academicLevel,
+      fileName: pdf.fileName,
+      uploadedBy: pdf.uploadedBy ? pdf.uploadedBy.email : 'Unknown', 
+      createdAt: pdf.createdAt.toISOString(),
+    }));
+
+    res.json({
+      message: 'تم جلب قائمة ملفات PDF بنجاح',
+      pdfs: pdfList,
     });
   } catch (error) {
-    console.error('List PDFs error:', {
-      message: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({ message: 'خطأ في جلب الملفات', error: error.message });
+    console.error('خطأ في جلب قائمة ملفات PDF:', error);
+    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
+
 
 // Delete PDF
 router.delete('/:id', authMiddleware, async (req, res) => {

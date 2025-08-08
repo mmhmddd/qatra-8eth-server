@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import JoinRequest from '../models/JoinRequest.js';
 import Notification from '../models/Notification.js';
 import validator from 'validator';
 import mongoose from 'mongoose';
@@ -26,26 +27,45 @@ const authMiddleware = (req, res, next) => {
 
 // Add a lecture
 router.post('/', authMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { link, name, subject } = req.body;
     
     // Validate inputs
     if (!link || !name || !subject) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'رابط المحاضرة، الاسم، والمادة مطلوبة' });
     }
     if (!validator.isURL(link)) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'رابط المحاضرة غير صالح' });
     }
     if (!validator.isLength(name, { min: 1, max: 100 })) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'اسم المحاضرة يجب أن يكون بين 1 و100 حرف' });
     }
     if (!validator.isLength(subject, { min: 1, max: 100 })) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ message: 'اسم المادة يجب أن يكون بين 1 و100 حرف' });
     }
 
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.userId).session(session);
     if (!user) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+
+    const joinRequest = await JoinRequest.findOne({ email: user.email }).session(session);
+    if (!joinRequest) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'طلب الانضمام غير موجود' });
     }
 
     if (!Array.isArray(user.lectures)) {
@@ -55,7 +75,9 @@ router.post('/', authMiddleware, async (req, res) => {
     const lecture = { link, name, subject, createdAt: new Date() };
     user.lectures.push(lecture);
     user.lectureCount = (user.lectureCount || 0) + 1;
-    await user.save();
+    joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 1;
+    
+    await Promise.all([user.save({ session }), joinRequest.save({ session })]);
 
     // Create notification for admin
     const notification = new Notification({
@@ -64,7 +86,7 @@ router.post('/', authMiddleware, async (req, res) => {
       type: 'lecture_added',
       lectureDetails: { link, name, subject }
     });
-    await notification.save();
+    await notification.save({ session });
 
     // Check monthly lecture count
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -75,17 +97,30 @@ router.post('/', authMiddleware, async (req, res) => {
         message: `تحذير: المستخدم ${user.email} قام برفع ${lectureCountThisMonth} محاضرة فقط هذا الشهر`,
         type: 'low_lecture_count'
       });
-      await warningNotification.save(); // Fixed: Save the warning notification
+      await warningNotification.save({ session });
     }
 
-    console.log('تم إضافة المحاضرة:', { userId: req.userId, link, name, subject, lectureCount: user.lectureCount });
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log('تم إضافة المحاضرة:', { 
+      userId: req.userId, 
+      link, 
+      name, 
+      subject, 
+      lectureCount: user.lectureCount, 
+      volunteerHours: joinRequest.volunteerHours 
+    });
     res.json({
       message: 'تم إضافة المحاضرة بنجاح',
       lecture,
-      lectureCount: user.lectureCount
+      lectureCount: user.lectureCount,
+      volunteerHours: joinRequest.volunteerHours
     });
   } catch (error) {
     console.error('خطأ في إضافة المحاضرة:', error);
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
