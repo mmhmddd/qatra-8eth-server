@@ -36,7 +36,9 @@ const userSchema = new Schema({
   students: [{
     name: { type: String, required: true },
     email: { type: String, required: true },
-    phone: { type: String, required: true }
+    phone: { type: String, required: true },
+    grade: { type: String, required: false, trim: true },
+    subject: { type: String, required: false, trim: true }
   }],
   meetings: [{
     _id: { type: Schema.Types.ObjectId, auto: true },

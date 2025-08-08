@@ -12,7 +12,7 @@ const notificationSchema = new Schema({
   },
   type: {
     type: String,
-    enum: ['lecture_added', 'low_lecture_count'],
+    enum: ['lecture_added', 'low_lecture_count_per_subject', 'other'], // أضفنا القيمة الجديدة هنا
     required: true
   },
   lectureDetails: {

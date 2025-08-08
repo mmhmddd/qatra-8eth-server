@@ -32,7 +32,6 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    // تصحيح خطأ الخاصية originalName إلى originalname
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const filename = uniqueSuffix + path.extname(file.originalname);
     console.log('اسم الملف المولد:', filename);
@@ -45,7 +44,6 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     console.log('فحص نوع الملف:', file.mimetype, file.originalname);
     const filetypes = /jpeg|jpg|png|gif/;
-    // تصحيح originalName إلى originalname
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
     
@@ -58,7 +56,7 @@ const upload = multer({
     }
   },
   limits: { 
-    fileSize: 10 * 1024 * 1024, // زيادة الحد إلى 10MB
+    fileSize: 10 * 1024 * 1024,
     files: 1
   }
 });
@@ -343,20 +341,37 @@ router.get('/members/:id', async (req, res) => {
 router.put('/members/:id/update-details', async (req, res) => {
   try {
     const { volunteerHours, numberOfStudents, students, subjects } = req.body;
-    if (volunteerHours === undefined || numberOfStudents === undefined || !Array.isArray(students) || !Array.isArray(subjects)) {
+
+    if (
+      volunteerHours === undefined ||
+      numberOfStudents === undefined ||
+      !Array.isArray(students) ||
+      !Array.isArray(subjects)
+    ) {
       return res.status(400).json({ message: 'ساعات التطوع، عدد الطلاب، بيانات الطلاب، والمواد مطلوبة' });
     }
+
     if (volunteerHours < 0 || numberOfStudents < 0) {
       return res.status(400).json({ message: 'ساعات التطوع وعدد الطلاب يجب أن يكونا صفر أو أكثر' });
     }
+
     if (students.some(student => !student.name || !student.email || !student.phone)) {
       return res.status(400).json({ message: 'بيانات الطلاب يجب أن تحتوي على الاسم، البريد الإلكتروني، والهاتف' });
+    }
+
+    if (students.some(student => student.grade && !validator.isLength(student.grade, { min: 1, max: 50 }))) {
+      return res.status(400).json({ message: 'الصف يجب أن يكون بين 1 و50 حرفًا إذا تم توفيره' });
+    }
+
+    if (students.some(student => student.subject && !validator.isLength(student.subject, { min: 1, max: 100 }))) {
+      return res.status(400).json({ message: 'المادة يجب أن تكون بين 1 و100 حرف إذا تم توفيرها' });
     }
 
     const member = await JoinRequest.findById(req.params.id);
     if (!member) {
       return res.status(404).json({ message: 'العضو غير موجود' });
     }
+
     if (member.status !== 'Approved') {
       return res.status(400).json({ message: 'يجب أن يكون العضو قد تمت الموافقة عليه' });
     }
@@ -369,11 +384,13 @@ router.put('/members/:id/update-details', async (req, res) => {
     member.volunteerHours = volunteerHours;
     member.students = students;
     member.subjects = subjects;
+
     user.numberOfStudents = numberOfStudents;
     user.students = students;
     user.subjects = subjects;
+
     await Promise.all([member.save(), user.save()]);
-    
+
     console.log('تم تحديث تفاصيل العضو:', { 
       memberId: member._id,
       volunteerHours, 
@@ -381,6 +398,7 @@ router.put('/members/:id/update-details', async (req, res) => {
       students, 
       subjects 
     });
+
     res.json({ 
       message: 'تم تحديث التفاصيل بنجاح',
       volunteerHours: member.volunteerHours,
@@ -388,21 +406,29 @@ router.put('/members/:id/update-details', async (req, res) => {
       students: user.students,
       subjects: user.subjects
     });
+    
   } catch (error) {
     console.error('خطأ في تحديث تفاصيل العضو:', error);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
 
+
 // Add a single student to a member
 router.post('/members/:id/add-student', async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, email, phone, grade, subject } = req.body;
     if (!name || !email || !phone) {
       return res.status(400).json({ message: 'الاسم، البريد الإلكتروني، والهاتف مطلوبة للطالب' });
     }
     if (!validator.isEmail(email)) {
       return res.status(400).json({ message: 'البريد الإلكتروني للطالب غير صالح' });
+    }
+    if (grade && !validator.isLength(grade, { min: 1, max: 50 })) {
+      return res.status(400).json({ message: 'الصف يجب أن يكون بين 1 و50 حرفًا إذا تم توفيره' });
+    }
+    if (subject && !validator.isLength(subject, { min: 1, max: 100 })) {
+      return res.status(400).json({ message: 'المادة يجب أن تكون بين 1 و100 حرف إذا تم توفيرها' });
     }
 
     const member = await JoinRequest.findById(req.params.id);
@@ -429,7 +455,7 @@ router.post('/members/:id/add-student', async (req, res) => {
       return res.status(400).json({ message: 'البريد الإلكتروني للطالب مستخدم بالفعل' });
     }
 
-    const newStudent = { name, email, phone };
+    const newStudent = { name, email, phone, grade, subject };
     user.students.push(newStudent);
     member.students.push(newStudent);
     user.numberOfStudents = (user.numberOfStudents || 0) + 1;
@@ -569,14 +595,12 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload profile image - المسار المحسّن
+// Upload profile image
 router.post('/profile/image', authMiddleware, (req, res) => {
   console.log('تلقي طلب رفع صورة شخصية...');
   
-  // استخدام middleware للـ multer مع معالجة الأخطاء
   upload.single('profileImage')(req, res, async (err) => {
     try {
-      // التحقق من أخطاء multer
       if (err) {
         console.error('خطأ في multer:', err.message);
         if (err instanceof multer.MulterError) {
@@ -593,7 +617,6 @@ router.post('/profile/image', authMiddleware, (req, res) => {
         });
       }
 
-      // التحقق من وجود الملف
       if (!req.file) {
         console.log('لم يتم تلقي أي ملف');
         return res.status(400).json({ 
@@ -604,10 +627,8 @@ router.post('/profile/image', authMiddleware, (req, res) => {
 
       console.log('تم تلقي الملف:', req.file);
 
-      // البحث عن المستخدم
       const user = await User.findById(req.userId);
       if (!user) {
-        // حذف الملف إذا لم يتم العثور على المستخدم
         try {
           fs.unlinkSync(req.file.path);
           console.log('تم حذف الملف بسبب عدم وجود المستخدم');
@@ -620,7 +641,6 @@ router.post('/profile/image', authMiddleware, (req, res) => {
         });
       }
 
-      // حذف الصورة الشخصية السابقة إن وجدت
       if (user.profileImage) {
         const oldImagePath = path.join(__dirname, '..', user.profileImage);
         try {
@@ -633,7 +653,6 @@ router.post('/profile/image', authMiddleware, (req, res) => {
         }
       }
 
-      // حفظ مسار الصورة الجديدة
       const imagePath = `/Uploads/${req.file.filename}`;
       user.profileImage = imagePath;
       await user.save();
@@ -652,7 +671,6 @@ router.post('/profile/image', authMiddleware, (req, res) => {
     } catch (error) {
       console.error('خطأ في رفع الصورة الشخصية:', error);
       
-      // حذف الملف في حالة حدوث خطأ
       if (req.file && req.file.path) {
         try {
           fs.unlinkSync(req.file.path);
@@ -713,7 +731,7 @@ router.post('/profile/meetings', authMiddleware, async (req, res) => {
   }
 });
 
-// Update a meeting - تم إصلاح خطأ المتغير fryer
+// Update a meeting
 router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const { title, date, startTime, endTime } = req.body;
@@ -738,7 +756,7 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
     }
 
     const meeting = user.meetings.id(meetingId);
-    if (!meeting) {  // تم تصحيح خطأ المتغير fryer إلى meeting
+    if (!meeting) {
       return res.status(404).json({ message: 'الموعد غير موجود' });
     }
 
