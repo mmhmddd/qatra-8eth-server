@@ -75,9 +75,8 @@ router.post('/', authMiddleware, async (req, res) => {
     const lecture = { link, name, subject, createdAt: new Date() };
     user.lectures.push(lecture);
     user.lectureCount = (user.lectureCount || 0) + 1;
-    joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 2; // Assume each lecture adds 2 volunteer hours
+    joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 2;
 
-    // Delete existing low_lecture_count_per_subject notifications for the given subject
     await Notification.deleteMany(
       {
         userId: req.userId,
@@ -87,13 +86,12 @@ router.post('/', authMiddleware, async (req, res) => {
       { session }
     );
 
-    // Check weekly lecture count per subject
     const startOfWeek = new Date();
     startOfWeek.setHours(0, 0, 0, 0);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay()); // Start of current week (Sunday)
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
 
     const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6); // End of current week (Saturday)
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
 
     const subjects = joinRequest.subjects || user.subjects || [];
@@ -103,7 +101,6 @@ router.post('/', authMiddleware, async (req, res) => {
         lectureCounts[subj] = 0;
       });
 
-      // Count lectures per subject for the current week
       user.lectures.forEach(lec => {
         if (new Date(lec.createdAt) >= startOfWeek && new Date(lec.createdAt) <= endOfWeek) {
           if (lectureCounts.hasOwnProperty(lec.subject)) {
@@ -112,12 +109,10 @@ router.post('/', authMiddleware, async (req, res) => {
         }
       });
 
-      // Include the new lecture in the count
       if (lectureCounts.hasOwnProperty(subject)) {
         lectureCounts[subject]++;
       }
 
-      // Check if any subject has less than 2 lectures
       const underTargetSubjects = Object.keys(lectureCounts).filter(subj => lectureCounts[subj] < 2);
       if (underTargetSubjects.length > 0) {
         const warningNotification = new Notification({
@@ -130,9 +125,8 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
 
-    // Check monthly lecture count
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const lectureCountThisMonth = user.lectures.filter(lecture => new Date(lecture.createdAt) >= startOfMonth).length + 1; // Include the new lecture
+    const lectureCountThisMonth = user.lectures.filter(lecture => new Date(lecture.createdAt) >= startOfMonth).length + 1;
     if (lectureCountThisMonth < 2) {
       const warningNotification = new Notification({
         userId: req.userId,
@@ -142,7 +136,6 @@ router.post('/', authMiddleware, async (req, res) => {
       await warningNotification.save({ session });
     }
 
-    // Create notification for adding the lecture
     const notification = new Notification({
       userId: req.userId,
       message: `تمت إضافة محاضرة جديدة بواسطة ${user.email}: ${name} (${subject}) - ${link}`,
@@ -298,6 +291,119 @@ router.delete('/notifications/:id', authMiddleware, async (req, res) => {
     res.json({ success: true, message: 'تم حذف الإشعار بنجاح' });
   } catch (error) {
     console.error('خطأ في حذف الإشعار:', error);
+    res.status(500).json({ success: false, message: 'خطأ في الخادم', error: error.message });
+  }
+});
+
+// Get members with fewer than two lectures per subject in the current week (Admin only)
+router.get('/low-lecture-members', authMiddleware, async (req, res) => {
+  try {
+    console.log('Fetching low lecture members for user:', req.userId, 'Role:', req.userRole);
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'يجب أن تكون أدمن لعرض هذه المعلومات' });
+    }
+
+    const startOfWeek = new Date();
+    startOfWeek.setHours(0, 0, 0, 0);
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const users = await User.find({}).lean();
+    const lowLectureMembers = [];
+
+    for (const user of users) {
+      if (!user.email) {
+        console.warn(`User with ID ${user._id} has no email`);
+        continue;
+      }
+      const joinRequest = await JoinRequest.findOne({ email: user.email }).lean();
+      if (!joinRequest) {
+        console.log(`No join request for user: ${user.email}`);
+        continue;
+      }
+      if (!joinRequest.subjects || !Array.isArray(joinRequest.subjects) || joinRequest.subjects.length === 0) {
+        console.log(`No valid subjects for user: ${user.email}`);
+        continue;
+      }
+      if (!user.lectures || !Array.isArray(user.lectures)) {
+        console.log(`No lectures for user: ${user.email}`);
+        continue;
+      }
+
+      const lectureCounts = {};
+      joinRequest.subjects.forEach(subj => {
+        lectureCounts[subj] = 0;
+      });
+
+      user.lectures.forEach(lec => {
+        if (!lec.createdAt || !lec.subject) {
+          console.warn(`Invalid lecture data for user ${user.email}:`, lec);
+          return;
+        }
+        if (new Date(lec.createdAt) >= startOfWeek && new Date(lec.createdAt) <= endOfWeek) {
+          if (lectureCounts.hasOwnProperty(lec.subject)) {
+            lectureCounts[lec.subject]++;
+          }
+        }
+      });
+
+      const underTargetSubjects = Object.keys(lectureCounts).filter(subj => lectureCounts[subj] < 2);
+      if (underTargetSubjects.length > 0) {
+        lowLectureMembers.push({
+          _id: user._id.toString(),
+          name: user.name || 'Unknown',
+          email: user.email,
+          underTargetSubjects
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: lowLectureMembers.length > 0
+        ? 'تم جلب الأعضاء الذين لديهم أقل من محاضرتين أسبوعيًا'
+        : 'لا يوجد أعضاء لديهم أقل من محاضرتين أسبوعيًا',
+      members: lowLectureMembers
+    });
+  } catch (error) {
+    console.error('Error in low-lecture-members:', { message: error.message, stack: error.stack });
+    res.status(500).json({ success: false, message: 'خطأ في الخادم', error: error.message });
+  }
+});
+
+// Get lectures by user ID (Admin only)
+router.get('/user/:userId', authMiddleware, async (req, res) => {
+  try {
+    if (req.userRole !== 'admin') {
+      return res.status(403).json({ success: false, message: 'يجب أن تكون أدمن لعرض محاضرات المستخدم' });
+    }
+
+    const userId = req.params.userId;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'معرف المستخدم غير صالح' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+    }
+
+    res.json({
+      success: true,
+      message: 'تم جلب المحاضرات بنجاح',
+      lectures: user.lectures.map(lecture => ({
+        _id: lecture._id.toString(),
+        link: lecture.link,
+        name: lecture.name,
+        subject: lecture.subject,
+        createdAt: lecture.createdAt.toISOString()
+      }))
+    });
+  } catch (error) {
+    console.error('خطأ في جلب محاضرات المستخدم:', error);
     res.status(500).json({ success: false, message: 'خطأ في الخادم', error: error.message });
   }
 });
