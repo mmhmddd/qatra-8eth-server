@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalName));
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   },
 });
 
@@ -34,7 +34,7 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalName).toLowerCase());
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase()); 
     const mimetype = filetypes.test(file.mimetype);
     if (extname && mimetype) {
       cb(null, true);
@@ -42,7 +42,7 @@ const upload = multer({
       cb(new Error('يجب أن تكون الصورة بصيغة JPEG أو PNG'));
     }
   },
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
 export default upload;

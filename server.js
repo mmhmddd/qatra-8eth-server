@@ -27,7 +27,7 @@ if (!process.env.PORT) {
   console.warn('Warning: PORT is not defined in .env file, defaulting to 5000');
 }
 if (!process.env.FRONTEND_URL) {
-  console.warn('Warning: FRONTEND_URL is not defined in .env file, defaulting to http://localhost:4200');
+  console.warn('Warning: FRONTEND_URL is not defined in .env file, defaulting to https://www.qatrah-ghaith.com');
 }
 
 // Connect to MongoDB
@@ -64,7 +64,7 @@ fs.mkdir(galleryUploadDir, { recursive: true })
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:4200',
+  origin: process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com',
   credentials: true
 }));
 
