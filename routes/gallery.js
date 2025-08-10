@@ -1,6 +1,7 @@
 import express from 'express';
 import { addImage, editImage, deleteImage, getAllImages, getImageById } from '../controllers/galleryController.js';
 import multer from 'multer';
+import path from 'path'; // إضافة هذا الاستيراد لإصلاح ReferenceError
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();

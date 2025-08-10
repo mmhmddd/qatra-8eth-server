@@ -65,9 +65,10 @@ app.use(cors({
 
 app.use(json());
 
-// Fallback for old gallery routes
-app.get('/api/Uploads/gallery/:imageName', (req, res) => {
-  res.status(410).json({ message: 'هذا المسار لم يعد مدعومًا. استخدم /api/gallery/images لجلب الصور.' });
+// Fallback for old upload routes to prevent unmatched errors
+app.get('/api/Uploads/*', (req, res) => {
+  console.log(`Old upload route requested: ${req.originalUrl}`);
+  res.status(410).json({ message: 'هذا المسار القديم لم يعد مدعومًا. استخدم /api/gallery/images للصور.' });
 });
 
 // Register routes
