@@ -43,10 +43,7 @@ cloudinary.v2.config({
 });
 
 // Connect to MongoDB
-connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
+connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => {
     console.error('MongoDB connection error:', err);
@@ -67,6 +64,11 @@ app.use(cors({
 }));
 
 app.use(json());
+
+// Fallback for old gallery routes
+app.get('/api/Uploads/gallery/:imageName', (req, res) => {
+  res.status(410).json({ message: 'هذا المسار لم يعد مدعومًا. استخدم /api/gallery/images لجلب الصور.' });
+});
 
 // Register routes
 console.log('Registering Leaderboard routes at /api/leaderboard');
