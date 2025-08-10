@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import cloudinary from 'cloudinary';
 
 // Import routes
 import leaderboardRoutes from './routes/leaderboard.js';
@@ -29,6 +30,17 @@ if (!process.env.PORT) {
 if (!process.env.FRONTEND_URL) {
   console.warn('Warning: FRONTEND_URL is not defined in .env file, defaulting to https://www.qatrah-ghaith.com');
 }
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('Error: Cloudinary credentials are missing in .env file');
+  process.exit(1);
+}
+
+// Configure Cloudinary
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Connect to MongoDB
 connect(process.env.MONGODB_URI, {
@@ -47,20 +59,6 @@ const app = express();
 // Setup directory info
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, 'Uploads');
-const testimonialsUploadDir = path.join(uploadDir, 'testimonials');
-const galleryUploadDir = path.join(uploadDir, 'gallery');
-
-// Ensure Uploads, testimonials, and gallery directories exist
-fs.mkdir(uploadDir, { recursive: true })
-  .then(() => console.log('Uploads directory ready'))
-  .catch(err => console.error('Error creating Uploads directory:', err));
-fs.mkdir(testimonialsUploadDir, { recursive: true })
-  .then(() => console.log('Testimonials Uploads directory ready'))
-  .catch(err => console.error('Error creating Testimonials Uploads directory:', err));
-fs.mkdir(galleryUploadDir, { recursive: true })
-  .then(() => console.log('Gallery Uploads directory ready'))
-  .catch(err => console.error('Error creating Gallery Uploads directory:', err));
 
 // Middleware
 app.use(cors({
@@ -69,33 +67,6 @@ app.use(cors({
 }));
 
 app.use(json());
-
-// Multer config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({ 
-  storage,
-  fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = filetypes.test(file.mimetype);
-    if (extname && mimetype) {
-      return cb(null, true);
-    } else {
-      cb(new Error('الملفات المسموح بها هي: JPEG, JPG, PNG'));
-    }
-  }
-});
-
-// Static files for uploads
-app.use('/Uploads', express.static(uploadDir));
 
 // Register routes
 console.log('Registering Leaderboard routes at /api/leaderboard');

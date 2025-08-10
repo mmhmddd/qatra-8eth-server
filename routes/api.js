@@ -12,32 +12,15 @@ import fs from 'fs';
 import sendEmail from '../utils/email.js';
 import validator from 'validator';
 import crypto from 'crypto';
+import cloudinary from 'cloudinary';
 
 const router = express.Router();
 
-// Multer configuration for file uploads
+// Multer configuration for file uploads (memory storage for Cloudinary)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, '../Uploads');
 
-// تأكد من وجود مجلد Uploads
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('تم إنشاء مجلد Uploads:', uploadDir);
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    console.log('تحديد وجهة الملف:', uploadDir);
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const filename = uniqueSuffix + path.extname(file.originalname);
-    console.log('اسم الملف المولد:', filename);
-    cb(null, filename);
-  }
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,
@@ -77,9 +60,6 @@ const authMiddleware = (req, res, next) => {
     res.status(401).json({ message: 'رمز غير صالح' });
   }
 };
-
-// Serve static files from Uploads directory
-router.use('/Uploads', express.static(uploadDir));
 
 // Submit a join request
 router.post('/join-requests', async (req, res) => {
@@ -260,6 +240,11 @@ router.delete('/members/:id', authMiddleware, async (req, res) => {
       await session.abortTransaction();
       session.endSession();
       return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
+    }
+
+    // Delete profile image from Cloudinary if exists
+    if (user.profileImagePublicId) {
+      await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
     }
 
     await JoinRequest.deleteOne({ _id: memberId }).session(session);
@@ -629,57 +614,39 @@ router.post('/profile/image', authMiddleware, (req, res) => {
 
       const user = await User.findById(req.userId);
       if (!user) {
-        try {
-          fs.unlinkSync(req.file.path);
-          console.log('تم حذف الملف بسبب عدم وجود المستخدم');
-        } catch (unlinkErr) {
-          console.error('خطأ في حذف الملف:', unlinkErr);
-        }
         return res.status(404).json({ 
           success: false,
           message: 'المستخدم غير موجود' 
         });
       }
 
-      if (user.profileImage) {
-        const oldImagePath = path.join(__dirname, '..', user.profileImage);
-        try {
-          if (fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-            console.log('تم حذف الصورة القديمة:', oldImagePath);
-          }
-        } catch (unlinkErr) {
-          console.error('خطأ في حذف الصورة القديمة:', unlinkErr);
-        }
+      // Upload to Cloudinary
+      const result = await cloudinary.v2.uploader.upload(`data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`, {
+        folder: 'profiles'
+      });
+
+      // Delete old image from Cloudinary if exists
+      if (user.profileImagePublicId) {
+        await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
       }
 
-      const imagePath = `/Uploads/${req.file.filename}`;
-      user.profileImage = imagePath;
+      user.profileImage = result.secure_url;
+      user.profileImagePublicId = result.public_id;
       await user.save();
 
-      console.log('تم رفع الصورة الشخصية بنجاح:', imagePath);
+      console.log('تم رفع الصورة الشخصية بنجاح:', result.secure_url);
       res.json({
         success: true,
         message: 'تم رفع الصورة الشخصية بنجاح',
         data: { 
-          profileImage: imagePath,
-          fileName: req.file.filename,
+          profileImage: result.secure_url,
+          fileName: req.file.originalname,
           fileSize: req.file.size
         }
       });
 
     } catch (error) {
       console.error('خطأ في رفع الصورة الشخصية:', error);
-      
-      if (req.file && req.file.path) {
-        try {
-          fs.unlinkSync(req.file.path);
-          console.log('تم حذف الملف بسبب حدوث خطأ');
-        } catch (unlinkErr) {
-          console.error('خطأ في حذف الملف:', unlinkErr);
-        }
-      }
-      
       res.status(500).json({ 
         success: false,
         message: 'خطأ في الخادم أثناء رفع الصورة', 

@@ -3,13 +3,7 @@ import User from '../models/User.js';
 import Leaderboard from '../models/Leaderboard.js';
 import validator from 'validator';
 import { calculateRankScore } from '../utils/leaderboardUtils.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, '../Uploads');
+import cloudinary from 'cloudinary';
 
 // Add a user to the leaderboard
 export const addUserToLeaderboard = async (req, res) => {
@@ -38,6 +32,17 @@ export const addUserToLeaderboard = async (req, res) => {
     let user;
     let joinRequest;
 
+    let imageUrl = null;
+    let imagePublicId = null;
+
+    if (image) {
+      const result = await cloudinary.v2.uploader.upload(`data:${image.mimetype};base64,${image.buffer.toString('base64')}`, {
+        folder: 'leaderboard'
+      });
+      imageUrl = result.secure_url;
+      imagePublicId = result.public_id;
+    }
+
     if (type === 'متطوع') {
       // For volunteers, fetch existing user details
       joinRequest = await JoinRequest.findOne({ email, status: 'Approved' });
@@ -50,18 +55,24 @@ export const addUserToLeaderboard = async (req, res) => {
       }
 
       // Use uploaded image if provided, otherwise fall back to User.profileImage
-      const imagePath = image ? `/Uploads/${image.filename}` : user.profileImage || null;
+      const finalImageUrl = imageUrl || user.profileImage || null;
+      const finalImagePublicId = imagePublicId || user.profileImagePublicId || null;
 
       leaderboardEntry = new Leaderboard({
         email,
         type,
         name: joinRequest.name,
-        image: imagePath,
+        image: finalImageUrl,
+        imagePublicId: finalImagePublicId
       });
 
       // Update User.profileImage if a new image was uploaded
-      if (image) {
-        user.profileImage = imagePath;
+      if (imageUrl) {
+        if (user.profileImagePublicId) {
+          await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
+        }
+        user.profileImage = imageUrl;
+        user.profileImagePublicId = imagePublicId;
         await user.save();
       }
     } else {
@@ -70,14 +81,13 @@ export const addUserToLeaderboard = async (req, res) => {
         return res.status(400).json({ message: 'الاسم، الرتبة، والصورة مطلوبة للقادة' });
       }
 
-      // Save image
-      const imagePath = `/Uploads/${image.filename}`;
       leaderboardEntry = new Leaderboard({
         email,
         type,
         rank,
         name,
-        image: imagePath,
+        image: imageUrl,
+        imagePublicId: imagePublicId
       });
 
       // Create new user if not exists
@@ -87,13 +97,18 @@ export const addUserToLeaderboard = async (req, res) => {
           email,
           name,
           role: 'leader',
-          profileImage: imagePath,
+          profileImage: imageUrl,
+          profileImagePublicId: imagePublicId
         });
         await user.save();
       } else {
         // Update user with new image and name if exists
+        if (user.profileImagePublicId) {
+          await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
+        }
         user.name = name;
-        user.profileImage = imagePath;
+        user.profileImage = imageUrl;
+        user.profileImagePublicId = imagePublicId;
         user.role = 'leader';
         await user.save();
       }
@@ -145,9 +160,9 @@ export const getLeaderboard = async (req, res) => {
         const score = joinRequest && user ? calculateRankScore(joinRequest.volunteerHours, user.numberOfStudents) : 0;
 
         // Ensure image is fetched from the appropriate source
-        let imagePath = entry.image;
+        let imageUrl = entry.image;
         if (entry.type === 'متطوع' && user) {
-          imagePath = user.profileImage || null; // Prefer User.profileImage for volunteers
+          imageUrl = user.profileImage || null; // Prefer User.profileImage for volunteers
         }
 
         return {
@@ -156,7 +171,7 @@ export const getLeaderboard = async (req, res) => {
           email: entry.email,
           type: entry.type,
           rank: entry.rank || null,
-          image: imagePath,
+          image: imageUrl,
           volunteerHours: joinRequest ? joinRequest.volunteerHours || 0 : 0,
           numberOfStudents: user ? user.numberOfStudents || 0 : 0,
           subjects: user ? user.subjects || [] : [],
@@ -215,19 +230,32 @@ export const editUserInLeaderboard = async (req, res) => {
     if (name) leaderboardEntry.name = name;
     if (leaderboardEntry.type === 'قاده' && rank) leaderboardEntry.rank = rank;
 
+    let imageUrl = leaderboardEntry.image;
+    let imagePublicId = leaderboardEntry.imagePublicId;
+
     // Handle image update
     if (image) {
-      // Delete old image if exists
-      if (leaderboardEntry.image) {
-        const oldImagePath = path.join(__dirname, '..', leaderboardEntry.image);
-        await fs.unlink(oldImagePath).catch(() => {});
+      const result = await cloudinary.v2.uploader.upload(`data:${image.mimetype};base64,${image.buffer.toString('base64')}`, {
+        folder: 'leaderboard'
+      });
+      imageUrl = result.secure_url;
+      imagePublicId = result.public_id;
+
+      // Delete old image
+      if (leaderboardEntry.imagePublicId) {
+        await cloudinary.v2.uploader.destroy(leaderboardEntry.imagePublicId);
       }
-      leaderboardEntry.image = `/Uploads/${image.filename}`;
+      leaderboardEntry.image = imageUrl;
+      leaderboardEntry.imagePublicId = imagePublicId;
 
       // Update user image
       let user = await User.findOne({ email });
       if (user) {
-        user.profileImage = `/Uploads/${image.filename}`;
+        if (user.profileImagePublicId) {
+          await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
+        }
+        user.profileImage = imageUrl;
+        user.profileImagePublicId = imagePublicId;
         user.name = name || user.name;
         await user.save();
       }
@@ -305,9 +333,8 @@ export const deleteUserFromLeaderboard = async (req, res) => {
     }
 
     // Delete image if exists
-    if (leaderboardEntry.image) {
-      const imagePath = path.join(__dirname, '..', leaderboardEntry.image);
-      await fs.unlink(imagePath).catch(() => {});
+    if (leaderboardEntry.imagePublicId) {
+      await cloudinary.v2.uploader.destroy(leaderboardEntry.imagePublicId).catch(() => {});
     }
 
     // Delete the user from the Leaderboard

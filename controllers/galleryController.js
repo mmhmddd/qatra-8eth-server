@@ -1,12 +1,6 @@
 import Gallery from '../models/Gallery.js';
 import User from '../models/User.js';
-import path from 'path';
-import fs from 'fs/promises';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const galleryUploadDir = path.join(__dirname, '../Uploads/gallery');
+import cloudinary from 'cloudinary';
 
 // Add a new image to the gallery
 export const addImage = async (req, res) => {
@@ -23,16 +17,21 @@ export const addImage = async (req, res) => {
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
 
-    const imagePath = `/Uploads/gallery/${image.filename}`;
+    // Upload to Cloudinary
+    const result = await cloudinary.v2.uploader.upload(`data:${image.mimetype};base64,${image.buffer.toString('base64')}`, {
+      folder: 'gallery'
+    });
+
     const galleryImage = new Gallery({
       title,
       description,
-      imagePath,
+      imagePath: result.secure_url,
+      imagePublicId: result.public_id,
       uploadedBy: req.userId
     });
 
     await galleryImage.save();
-    console.log('تم إضافة صورة إلى المعرض:', { title, imagePath });
+    console.log('تم إضافة صورة إلى المعرض:', { title, imagePath: result.secure_url });
 
     res.status(201).json({
       message: 'تم إضافة الصورة بنجاح',
@@ -69,11 +68,18 @@ export const editImage = async (req, res) => {
 
     if (title) galleryImage.title = title;
     if (description !== undefined) galleryImage.description = description;
+
     if (image) {
-      // Delete old image
-      const oldImagePath = path.join(__dirname, '..', galleryImage.imagePath);
-      await fs.unlink(oldImagePath).catch(() => {});
-      galleryImage.imagePath = `/Uploads/gallery/${image.filename}`;
+      // Delete old image from Cloudinary
+      if (galleryImage.imagePublicId) {
+        await cloudinary.v2.uploader.destroy(galleryImage.imagePublicId);
+      }
+      // Upload new image
+      const result = await cloudinary.v2.uploader.upload(`data:${image.mimetype};base64,${image.buffer.toString('base64')}`, {
+        folder: 'gallery'
+      });
+      galleryImage.imagePath = result.secure_url;
+      galleryImage.imagePublicId = result.public_id;
     }
 
     await galleryImage.save();
@@ -110,9 +116,10 @@ export const deleteImage = async (req, res) => {
       return res.status(403).json({ message: 'غير مصرح لك بحذف هذه الصورة' });
     }
 
-    // Delete image file
-    const imagePath = path.join(__dirname, '..', galleryImage.imagePath);
-    await fs.unlink(imagePath).catch(() => {});
+    // Delete image from Cloudinary
+    if (galleryImage.imagePublicId) {
+      await cloudinary.v2.uploader.destroy(galleryImage.imagePublicId).catch(() => {});
+    }
 
     await Gallery.deleteOne({ _id: imageId });
     console.log('تم حذف الصورة:', { id: imageId });
