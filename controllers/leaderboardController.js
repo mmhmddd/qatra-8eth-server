@@ -52,32 +52,30 @@ export const addUserToLeaderboard = async (req, res) => {
         imagePublicId: user.profileImagePublicId || null
       });
     } else {
-      // For leaders, require name and rank
-      if (!name || !rank) {
-        return res.status(400).json({ message: 'الاسم والرتبة مطلوبة للقادة' });
+      // For leaders, require name, rank, and image
+      if (!name || !rank || !file) {
+        return res.status(400).json({ message: 'الاسم والرتبة والصورة مطلوبة للقادة' });
       }
 
-      // Upload image to Cloudinary if provided
-      if (file) {
-        const result = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.v2.uploader.upload_stream(
-            {
-              folder: 'leaderboard',
-              transformation: [
-                { width: 500, height: 500, crop: 'limit' },
-                { quality: 'auto', fetch_format: 'auto' }
-              ]
-            },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          uploadStream.end(file.buffer);
-        });
-        imageUrl = result.secure_url;
-        imagePublicId = result.public_id;
-      }
+      // Upload image to Cloudinary
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.v2.uploader.upload_stream(
+          {
+            folder: 'leaderboard',
+            transformation: [
+              { width: 500, height: 500, crop: 'limit' },
+              { quality: 'auto', fetch_format: 'auto' }
+            ]
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(file.buffer);
+      });
+      imageUrl = result.secure_url;
+      imagePublicId = result.public_id;
 
       leaderboardEntry = new Leaderboard({
         email,
@@ -209,7 +207,7 @@ export const editUserInLeaderboard = async (req, res) => {
     let imageUrl = leaderboardEntry.image;
     let imagePublicId = leaderboardEntry.imagePublicId;
 
-    if (file) {
+    if (leaderboardEntry.type === 'قاده' && file) {
       // Delete old image from Cloudinary if it exists
       if (imagePublicId) {
         await cloudinary.v2.uploader.destroy(imagePublicId);
@@ -237,8 +235,10 @@ export const editUserInLeaderboard = async (req, res) => {
 
     if (name) leaderboardEntry.name = name;
     if (leaderboardEntry.type === 'قاده' && rank) leaderboardEntry.rank = rank;
-    leaderboardEntry.image = imageUrl;
-    leaderboardEntry.imagePublicId = imagePublicId;
+    if (leaderboardEntry.type === 'قاده') {
+      leaderboardEntry.image = imageUrl;
+      leaderboardEntry.imagePublicId = imagePublicId;
+    }
 
     let joinRequest = await JoinRequest.findOne({ email, status: 'Approved' });
     let user = await User.findOne({ email });

@@ -8,12 +8,12 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif|webp/;
+    const filetypes = /jpeg|jpg|png/;
     const mimetype = filetypes.test(file.mimetype);
     if (mimetype) {
       return cb(null, true);
     }
-    cb(new Error('نوع الملف غير مدعوم. يجب أن يكون JPEG، PNG، GIF، أو WebP'));
+    cb(new Error('نوع الملف غير مدعوم. يجب أن يكون JPEG أو PNG'));
   }
 });
 
