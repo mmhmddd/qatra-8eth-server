@@ -23,6 +23,10 @@ const leaderboardSchema = new Schema({
     type: String,
     default: null,
   },
+  imagePublicId: {
+    type: String,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

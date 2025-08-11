@@ -3,10 +3,12 @@ import User from '../models/User.js';
 import Leaderboard from '../models/Leaderboard.js';
 import validator from 'validator';
 import { calculateRankScore } from '../utils/leaderboardUtils.js';
+import cloudinary from 'cloudinary';
 
 export const addUserToLeaderboard = async (req, res) => {
   try {
     const { email, type, name, rank } = req.body;
+    const file = req.file;
 
     // Validate input
     if (!email || !type) {
@@ -28,6 +30,8 @@ export const addUserToLeaderboard = async (req, res) => {
     let leaderboardEntry;
     let user;
     let joinRequest;
+    let imageUrl = null;
+    let imagePublicId = null;
 
     if (type === 'متطوع') {
       // For volunteers, fetch existing user details
@@ -44,7 +48,8 @@ export const addUserToLeaderboard = async (req, res) => {
         email,
         type,
         name: joinRequest.name,
-        image: user.profileImage || null
+        image: user.profileImage || null,
+        imagePublicId: user.profileImagePublicId || null
       });
     } else {
       // For leaders, require name and rank
@@ -52,12 +57,35 @@ export const addUserToLeaderboard = async (req, res) => {
         return res.status(400).json({ message: 'الاسم والرتبة مطلوبة للقادة' });
       }
 
+      // Upload image to Cloudinary if provided
+      if (file) {
+        const result = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.v2.uploader.upload_stream(
+            {
+              folder: 'leaderboard',
+              transformation: [
+                { width: 500, height: 500, crop: 'limit' },
+                { quality: 'auto', fetch_format: 'auto' }
+              ]
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(file.buffer);
+        });
+        imageUrl = result.secure_url;
+        imagePublicId = result.public_id;
+      }
+
       leaderboardEntry = new Leaderboard({
         email,
         type,
         rank,
         name,
-        image: null
+        image: imageUrl,
+        imagePublicId
       });
 
       // Create or update user
@@ -164,6 +192,7 @@ export const getLeaderboard = async (req, res) => {
 export const editUserInLeaderboard = async (req, res) => {
   try {
     const { email, name, rank, volunteerHours, numberOfStudents, subjects } = req.body;
+    const file = req.file;
 
     if (!email) {
       return res.status(400).json({ message: 'البريد الإلكتروني مطلوب' });
@@ -177,14 +206,45 @@ export const editUserInLeaderboard = async (req, res) => {
       return res.status(404).json({ message: 'المستخدم غير موجود في لوحة الصدارة' });
     }
 
+    let imageUrl = leaderboardEntry.image;
+    let imagePublicId = leaderboardEntry.imagePublicId;
+
+    if (file) {
+      // Delete old image from Cloudinary if it exists
+      if (imagePublicId) {
+        await cloudinary.v2.uploader.destroy(imagePublicId);
+      }
+      // Upload new image to Cloudinary
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.v2.uploader.upload_stream(
+          {
+            folder: 'leaderboard',
+            transformation: [
+              { width: 500, height: 500, crop: 'limit' },
+              { quality: 'auto', fetch_format: 'auto' }
+            ]
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(file.buffer);
+      });
+      imageUrl = result.secure_url;
+      imagePublicId = result.public_id;
+    }
+
     if (name) leaderboardEntry.name = name;
     if (leaderboardEntry.type === 'قاده' && rank) leaderboardEntry.rank = rank;
+    leaderboardEntry.image = imageUrl;
+    leaderboardEntry.imagePublicId = imagePublicId;
 
     let joinRequest = await JoinRequest.findOne({ email, status: 'Approved' });
     let user = await User.findOne({ email });
 
     if (volunteerHours !== undefined && joinRequest) {
-      joinRequest.volunteerHours = volunteerHours;
+      joinRequest.volunteerHours = parseInt(volunteerHours);
     }
     if (subjects) {
       if (!Array.isArray(subjects) || subjects.some(subject => typeof subject !== 'string' || subject.trim() === '')) {
@@ -194,7 +254,7 @@ export const editUserInLeaderboard = async (req, res) => {
       if (user) user.subjects = subjects;
     }
     if (numberOfStudents !== undefined && user) {
-      user.numberOfStudents = numberOfStudents;
+      user.numberOfStudents = parseInt(numberOfStudents);
     }
 
     await Promise.all([
@@ -242,6 +302,11 @@ export const deleteUserFromLeaderboard = async (req, res) => {
     const leaderboardEntry = await Leaderboard.findOne({ email });
     if (!leaderboardEntry) {
       return res.status(404).json({ message: 'المستخدم غير موجود في لوحة الصدارة' });
+    }
+
+    // Delete image from Cloudinary if it exists
+    if (leaderboardEntry.imagePublicId) {
+      await cloudinary.v2.uploader.destroy(leaderboardEntry.imagePublicId);
     }
 
     await Leaderboard.deleteOne({ email });
