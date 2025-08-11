@@ -54,7 +54,7 @@ export const addUserToLeaderboard = async (req, res) => {
     } else {
       // For leaders, require name, rank, and image
       if (!name || !rank || !file) {
-        return res.status(400).json({ message: 'الاسم والرتبة والصورة مطلوبة للقادة' });
+        return res.status(400).json({ message: 'الاسم، الرتبة، والصورة مطلوبة للقادة' });
       }
 
       // Upload image to Cloudinary
@@ -320,3 +320,4 @@ export const deleteUserFromLeaderboard = async (req, res) => {
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 };
+
