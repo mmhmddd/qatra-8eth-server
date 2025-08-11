@@ -12,9 +12,17 @@ import fs from 'fs';
 import sendEmail from '../utils/email.js';
 import validator from 'validator';
 import crypto from 'crypto';
-import cloudinary from 'cloudinary';
+import { v2 as cloudinary } from 'cloudinary';
 
 const router = express.Router();
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
+});
 
 // Multer configuration for file uploads (memory storage for Cloudinary)
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +34,7 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     console.log('فحص نوع الملف:', file.mimetype, file.originalname);
-    const filetypes = /jpeg|jpg|png|gif/;
+    const filetypes = /jpeg|jpg|png|gif|webp/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
     
@@ -35,11 +43,11 @@ const upload = multer({
       return cb(null, true);
     } else {
       console.log('نوع الملف مرفوض');
-      cb(new Error('يجب أن تكون الصورة بصيغة JPEG، PNG، أو GIF'));
+      cb(new Error('يجب أن تكون الصورة بصيغة JPEG، PNG، GIF، أو WebP'));
     }
   },
   limits: { 
-    fileSize: 10 * 1024 * 1024,
+    fileSize: 10 * 1024 * 1024, // 10MB
     files: 1
   }
 });
@@ -156,6 +164,8 @@ router.post('/join-requests/:id/approve', authMiddleware, async (req, res) => {
       lectures: [],
       lectureCount: 0,
       role: 'user',
+      profileImage: null,
+      profileImagePublicId: null
     });
     await user.save({ session });
     console.log('تم إنشاء المستخدم:', user.email);
@@ -244,7 +254,13 @@ router.delete('/members/:id', authMiddleware, async (req, res) => {
 
     // Delete profile image from Cloudinary if exists
     if (user.profileImagePublicId) {
-      await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
+      try {
+        await cloudinary.uploader.destroy(user.profileImagePublicId);
+        console.log('تم حذف الصورة من Cloudinary:', user.profileImagePublicId);
+      } catch (cloudinaryError) {
+        console.error('خطأ في حذف الصورة من Cloudinary:', cloudinaryError);
+        // Continue with user deletion even if Cloudinary deletion fails
+      }
     }
 
     await JoinRequest.deleteOne({ _id: memberId }).session(session);
@@ -281,7 +297,8 @@ router.get('/approved-members', async (req, res) => {
         subjects: user?.subjects || [],
         students: user?.students || [],
         lectures: user?.lectures || [],
-        lectureCount: user?.lectureCount || 0
+        lectureCount: user?.lectureCount || 0,
+        profileImage: user?.profileImage || null
       };
     }));
     console.log('تم جلب الأعضاء المعتمدين:', membersWithDetails.length);
@@ -315,6 +332,7 @@ router.get('/members/:id', async (req, res) => {
       lectureCount: user?.lectureCount || 0,
       status: member.status,
       createdAt: member.createdAt,
+      profileImage: user?.profileImage || null,
     });
   } catch (error) {
     console.error('خطأ في جلب تفاصيل العضو:', error);
@@ -397,7 +415,6 @@ router.put('/members/:id/update-details', async (req, res) => {
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
-
 
 // Add a single student to a member
 router.post('/members/:id/add-student', async (req, res) => {
@@ -513,7 +530,8 @@ router.get('/profile', authMiddleware, async (req, res) => {
       subjects: user.subjects,
       meetings: user.meetings,
       lectures: user.lectures,
-      lectureCount: user.lectureCount
+      lectureCount: user.lectureCount,
+      profileImage: user.profileImage
     });
     res.json({
       success: true,
@@ -580,7 +598,7 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload profile image
+// Upload profile image to Cloudinary
 router.post('/profile/image', authMiddleware, (req, res) => {
   console.log('تلقي طلب رفع صورة شخصية...');
   
@@ -610,7 +628,11 @@ router.post('/profile/image', authMiddleware, (req, res) => {
         });
       }
 
-      console.log('تم تلقي الملف:', req.file);
+      console.log('تم تلقي الملف:', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      });
 
       const user = await User.findById(req.userId);
       if (!user) {
@@ -620,26 +642,55 @@ router.post('/profile/image', authMiddleware, (req, res) => {
         });
       }
 
-      // Upload to Cloudinary
-      const result = await cloudinary.v2.uploader.upload(`data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`, {
-        folder: 'profiles'
-      });
-
       // Delete old image from Cloudinary if exists
       if (user.profileImagePublicId) {
-        await cloudinary.v2.uploader.destroy(user.profileImagePublicId);
+        try {
+          await cloudinary.uploader.destroy(user.profileImagePublicId);
+          console.log('تم حذف الصورة القديمة من Cloudinary:', user.profileImagePublicId);
+        } catch (deleteError) {
+          console.error('خطأ في حذف الصورة القديمة من Cloudinary:', deleteError);
+        }
       }
 
-      user.profileImage = result.secure_url;
-      user.profileImagePublicId = result.public_id;
+      // Upload new image to Cloudinary
+      const uploadResult = await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_stream(
+          {
+            folder: 'profile_images',
+            resource_type: 'image',
+            transformation: [
+              { width: 500, height: 500, crop: 'limit' },
+              { quality: 'auto' },
+              { format: 'auto' }
+            ]
+          },
+          (error, result) => {
+            if (error) {
+              console.error('خطأ في رفع الصورة إلى Cloudinary:', error);
+              reject(error);
+            } else {
+              console.log('تم رفع الصورة إلى Cloudinary بنجاح:', result?.secure_url);
+              resolve(result);
+            }
+          }
+        ).end(req.file.buffer);
+      });
+
+      // Update user profile with new image URL and public_id
+      user.profileImage = uploadResult.secure_url;
+      user.profileImagePublicId = uploadResult.public_id;
       await user.save();
 
-      console.log('تم رفع الصورة الشخصية بنجاح:', result.secure_url);
+      console.log('تم تحديث بيانات المستخدم بالصورة الجديدة:', {
+        profileImage: user.profileImage,
+        profileImagePublicId: user.profileImagePublicId
+      });
+
       res.json({
         success: true,
         message: 'تم رفع الصورة الشخصية بنجاح',
         data: { 
-          profileImage: result.secure_url,
+          profileImage: uploadResult.secure_url,
           fileName: req.file.originalname,
           fileSize: req.file.size
         }
@@ -654,6 +705,52 @@ router.post('/profile/image', authMiddleware, (req, res) => {
       });
     }
   });
+});
+
+// Delete profile image
+router.delete('/profile/image', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'المستخدم غير موجود' 
+      });
+    }
+
+    if (!user.profileImagePublicId) {
+      return res.status(400).json({
+        success: false,
+        message: 'لا توجد صورة شخصية لحذفها'
+      });
+    }
+
+    // Delete image from Cloudinary
+    try {
+      await cloudinary.uploader.destroy(user.profileImagePublicId);
+      console.log('تم حذف الصورة من Cloudinary:', user.profileImagePublicId);
+    } catch (cloudinaryError) {
+      console.error('خطأ في حذف الصورة من Cloudinary:', cloudinaryError);
+    }
+
+    // Remove image references from user document
+    user.profileImage = null;
+    user.profileImagePublicId = null;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'تم حذف الصورة الشخصية بنجاح'
+    });
+
+  } catch (error) {
+    console.error('خطأ في حذف الصورة الشخصية:', error);
+    res.status(500).json({
+      success: false,
+      message: 'خطأ في الخادم أثناء حذف الصورة',
+      error: error.message
+    });
+  }
 });
 
 // Add a meeting to calendar
