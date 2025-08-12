@@ -1,51 +1,58 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import User from './models/User.js';
-// تحميل متغيرات البيئة
+
+// Load environment variables
 dotenv.config();
 
-// الاتصال بقاعدة البيانات
+// Connect to the database
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log('تم الاتصال بقاعدة البيانات بنجاح');
+    console.log('Connected to the database successfully');
   } catch (error) {
-    console.error('خطأ في الاتصال بقاعدة البيانات:', error);
+    console.error('Error connecting to the database:', error);
     process.exit(1);
   }
 };
 
-// دالة لتحديث المستخدم إلى مشرف
+// Function to make a user an admin
 const makeUserAdmin = async (email) => {
   try {
-    // البحث عن المستخدم بالبريد الإلكتروني
+    // Find the user by email
     const user = await User.findOne({ email });
     if (!user) {
-      console.error(`لم يتم العثور على مستخدم بالبريد الإلكتروني: ${email}`);
+      console.error(`No user found with email: ${email}`);
       return;
     }
 
-    // تحديث حقل role إلى 'admin'
+    // Check if the user is already an admin
+    if (user.role === 'admin') {
+      console.log(`User ${email} is already an admin!`);
+      return;
+    }
+
+    // Update the user's role to 'admin'
     user.role = 'admin';
     await user.save();
 
-    console.log(`تم تحويل المستخدم ${email} إلى مشرف بنجاح!`);
+    console.log(`User ${email} has been successfully made an admin!`);
   } catch (error) {
-    console.error('خطأ أثناء تحديث المستخدم:', error);
+    console.error('Error updating user:', error);
   } finally {
-    // إغلاق الاتصال بقاعدة البيانات
+    // Close the database connection
     await mongoose.connection.close();
-    console.log('تم إغلاق الاتصال بقاعدة البيانات');
+    console.log('Database connection closed');
   }
 };
 
-// تنفيذ السكربت
+// Execute the script
 const run = async () => {
   await connectDB();
-  await makeUserAdmin('mohamed123456@example.com'); // استبدل بالبريد الإلكتروني للمستخدم
+  await makeUserAdmin('omaramar5090@gmail.com'); // Updated email
 };
 
 run();

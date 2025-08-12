@@ -139,14 +139,18 @@ export const getAllImages = async (req, res) => {
       return res.status(404).json({ message: 'لا توجد صور في المعرض' });
     }
 
-    const formattedImages = galleryImages.map(image => ({
-      id: image._id,
-      title: image.title,
-      description: image.description,
-      imagePath: image.imagePath,
-      uploadedBy: image.uploadedBy.email,
-      createdAt: image.createdAt
-    }));
+    const formattedImages = galleryImages.map(image => {
+      // تسجيل تصحيح مؤقت لتتبع المشكلة
+      console.log('Image ID:', image._id, 'UploadedBy:', image.uploadedBy);
+      return {
+        id: image._id,
+        title: image.title,
+        description: image.description,
+        imagePath: image.imagePath,
+        uploadedBy: image.uploadedBy?.email || 'غير متوفر', // إصلاح الخطأ هنا
+        createdAt: image.createdAt
+      };
+    });
 
     console.log('تم جلب جميع الصور:', formattedImages.length);
     res.json({
@@ -169,6 +173,9 @@ export const getImageById = async (req, res) => {
       return res.status(404).json({ message: 'الصورة غير موجودة' });
     }
 
+    // تسجيل تصحيح مؤقت لتتبع المشكلة
+    console.log('Image ID:', imageId, 'UploadedBy:', galleryImage.uploadedBy);
+
     console.log('تم جلب الصورة:', { id: imageId });
     res.json({
       message: 'تم جلب الصورة بنجاح',
@@ -177,7 +184,7 @@ export const getImageById = async (req, res) => {
         title: galleryImage.title,
         description: galleryImage.description,
         imagePath: galleryImage.imagePath,
-        uploadedBy: galleryImage.uploadedBy.email,
+        uploadedBy: galleryImage.uploadedBy?.email || 'غير متوفر', // إصلاح الخطأ هنا
         createdAt: galleryImage.createdAt
       }
     });

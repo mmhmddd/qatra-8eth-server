@@ -1,6 +1,7 @@
 import JoinRequest from '../models/JoinRequest.js';
 import User from '../models/User.js';
 import Leaderboard from '../models/Leaderboard.js';
+import Gallery from '../models/Gallery.js'; // إضافة استيراد Gallery
 import validator from 'validator';
 import { calculateRankScore } from '../utils/leaderboardUtils.js';
 import cloudinary from 'cloudinary';
@@ -89,6 +90,7 @@ export const addUserToLeaderboard = async (req, res) => {
       // Create or update user
       user = await User.findOne({ email });
       if (!user) {
+        console.log(`إنشاء مستخدم جديد للبريد ${email}`);
         user = new User({
           email,
           name,
@@ -142,11 +144,17 @@ export const getLeaderboard = async (req, res) => {
       leaderboardUsers.map(async (entry) => {
         const joinRequest = await JoinRequest.findOne({ email: entry.email, status: 'Approved' });
         const user = await User.findOne({ email: entry.email });
-        const score = joinRequest && user ? calculateRankScore(joinRequest.volunteerHours, user.numberOfStudents) : 0;
+        const score = joinRequest && user ? calculateRankScore(joinRequest.volunteerHours || 0, user.numberOfStudents || 0) : 0;
 
         let imageUrl = entry.image;
         if (entry.type === 'متطوع' && user) {
           imageUrl = user.profileImage || null;
+        }
+
+        // تخطي السجلات إذا لم يكن المستخدم موجودًا
+        if (!user && entry.type === 'متطوع') {
+          console.log(`تحذير: المستخدم غير موجود للبريد ${entry.email}`);
+          return null;
         }
 
         return {
@@ -210,7 +218,7 @@ export const editUserInLeaderboard = async (req, res) => {
     if (leaderboardEntry.type === 'قاده' && file) {
       // Delete old image from Cloudinary if it exists
       if (imagePublicId) {
-        await cloudinary.v2.uploader.destroy(imagePublicId);
+        await cloudinary.v2.uploader.destroy(imagePublicId).catch(() => {});
       }
       // Upload new image to Cloudinary
       const result = await new Promise((resolve, reject) => {
@@ -306,10 +314,29 @@ export const deleteUserFromLeaderboard = async (req, res) => {
 
     // Delete image from Cloudinary if it exists
     if (leaderboardEntry.imagePublicId) {
-      await cloudinary.v2.uploader.destroy(leaderboardEntry.imagePublicId);
+      await cloudinary.v2.uploader.destroy(leaderboardEntry.imagePublicId).catch(() => {});
     }
 
+    // Find the user to get their _id
+    const user = await User.findOne({ email });
+    if (user) {
+      // Delete related gallery images
+      const galleryImages = await Gallery.find({ uploadedBy: user._id });
+      for (const image of galleryImages) {
+        if (image.imagePublicId) {
+          await cloudinary.v2.uploader.destroy(image.imagePublicId).catch(() => {});
+        }
+      }
+      await Gallery.deleteMany({ uploadedBy: user._id });
+    }
+
+    // Delete the leaderboard entry
     await Leaderboard.deleteOne({ email });
+
+    // Optionally, delete the user from the User collection
+    // if (user) {
+    //   await User.deleteOne({ _id: user._id });
+    // }
 
     res.json({
       message: 'تم حذف المستخدم من لوحة الصدارة بنجاح',
@@ -320,4 +347,3 @@ export const deleteUserFromLeaderboard = async (req, res) => {
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 };
-
