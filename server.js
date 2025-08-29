@@ -1,5 +1,5 @@
 import express, { json } from 'express';
-import { connect } from 'mongoose';
+import mongoose from 'mongoose';
 import { config } from 'dotenv';
 import cors from 'cors';
 import multer from 'multer';
@@ -18,11 +18,11 @@ import testimonialsRoutes from './routes/testimonials.js';
 import lectureRoutes from './routes/lectureRoutes.js';
 import galleryRoutes from './routes/gallery.js';
 import lectureRequestRoutes from './routes/lectureRequestRoutes.js';
-import forgetPasswordRoutes from './routes/forgotPassword.js'; 
+import forgetPasswordRoutes from './routes/forgotPassword.js';
+import messageRoutes from './routes/messageRoutes.js';
 
 process.env.TZ = 'Africa/Cairo';
 
-// Load environment variables
 config();
 
 if (!process.env.MONGODB_URI) {
@@ -53,14 +53,33 @@ cloudinary.v2.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+User.schema.pre('deleteOne', { document: false, query: true }, function() {
+  console.log('Attempted deleteOne on User:', this.getQuery());
+});
 
-connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
+User.schema.pre('deleteMany', { document: false, query: true }, function() {
+  console.log('Attempted deleteMany on User:', this.getQuery());
+});
+
+mongoose.connect(process.env.MONGODB_URI)
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
+    try {
+      const indexes = await User.collection.indexInformation();
+      for (const [name, index] of Object.entries(indexes)) {
+        if ('expireAfterSeconds' in index) {
+          await User.collection.dropIndex(name);
+          console.log(`Dropped TTL index: ${name}`);
+        }
+      }
+    } catch (err) {
+      console.error('Error checking/dropping TTL indexes:', err);
+    }
+  })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);
     process.exit(1);
   });
-
 
 const app = express();
 
@@ -72,7 +91,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(json());
-
 
 app.get('/api/Uploads/*', (req, res) => {
   console.log(`Old upload route requested: ${req.originalUrl}`);
@@ -103,11 +121,14 @@ app.use('/api/lecture-requests', lectureRequestRoutes);
 console.log('Registering Forget Password routes at /api');
 app.use('/api', forgetPasswordRoutes);
 
+console.log('Registering Message routes at /api/messages');
+app.use('/api/messages', messageRoutes);
+
 cron.schedule('1 0 * * *', async () => {
   console.log('⏰ Checking daily meeting reminders at:', new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' }));
   try {
     const now = new Date();
-    const nowUTC = new Date(now.getTime() - 3 * 60 * 60 * 1000); // EEST is UTC+3
+    const nowUTC = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const startOfDayUTC = new Date(nowUTC);
     startOfDayUTC.setUTCHours(0, 0, 0, 0);
     const endOfDayUTC = new Date(nowUTC);
@@ -187,12 +208,10 @@ cron.schedule('1 0 * * *', async () => {
   }
 });
 
-
 app.use((req, res) => {
   console.log(`Unmatched route: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ message: `Cannot ${req.method} ${req.originalUrl}` });
 });
-
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(` Server running on port ${PORT}`));

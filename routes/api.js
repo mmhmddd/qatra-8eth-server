@@ -16,7 +16,6 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
-// Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -24,7 +23,6 @@ cloudinary.config({
   secure: true
 });
 
-// Multer configuration for file uploads
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -47,12 +45,11 @@ const upload = multer({
     }
   },
   limits: { 
-    fileSize: 10 * 1024 * 1024, // 10MB
+    fileSize: 10 * 1024 * 1024,
     files: 1
   }
 });
 
-// Middleware to verify JWT token
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');
   if (!token) {
@@ -71,7 +68,6 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// Admin middleware
 const adminMiddleware = (req, res, next) => {
   if (req.userRole !== 'admin') {
     console.error('محاولة وصول غير مصرح بها:', req.userId);
@@ -80,7 +76,6 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-// Submit a join request
 router.post('/join-requests', async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -126,7 +121,6 @@ router.post('/join-requests', async (req, res) => {
   }
 });
 
-// Get all join requests
 router.get('/join-requests', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const joinRequests = await JoinRequest.find();
@@ -142,14 +136,12 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    // التحقق من وجود متغيرات البيئة لإعدادات البريد الإلكتروني
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
       await session.abortTransaction();
       session.endSession();
       return res.status(500).json({ message: 'خطأ في إعدادات البريد الإلكتروني، تحقق من متغيرات البيئة' });
     }
 
-    // البحث عن طلب الانضمام باستخدام المعرف
     const joinRequest = await JoinRequest.findById(req.params.id).session(session);
     if (!joinRequest) {
       await session.abortTransaction();
@@ -157,26 +149,22 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       return res.status(404).json({ message: 'الطلب غير موجود' });
     }
 
-    // التحقق من أن الطلب في حالة "معلق"
     if (joinRequest.status !== 'Pending') {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: 'الطلب تم معالجته مسبقًا' });
     }
 
-    // تحديث حالة الطلب إلى "موافق عليه" وتعيين ساعات التطوع إلى 0
     joinRequest.status = 'Approved';
     joinRequest.volunteerHours = 0;
     await joinRequest.save({ session });
 
-    // التحقق من صحة البريد الإلكتروني
     if (!validator.isEmail(joinRequest.email)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ message: 'البريد الإلكتروني للطلب غير صالح' });
     }
 
-    // التحقق من عدم وجود مستخدم مسجل مسبقًا بنفس البريد الإلكتروني
     const existingUser = await User.findOne({ email: joinRequest.email }).session(session);
     if (existingUser) {
       await session.abortTransaction();
@@ -184,11 +172,9 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       return res.status(400).json({ message: 'حساب المستخدم موجود بالفعل' });
     }
 
-    // إنشاء كلمة مرور عشوائية وتشفيرها
     const randomPassword = crypto.randomBytes(8).toString('hex');
     const hashedPassword = await hash(randomPassword, 10);
 
-    // إنشاء مستخدم جديد
     const user = new User({
       email: joinRequest.email.toLowerCase().trim(),
       password: hashedPassword,
@@ -205,7 +191,6 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     await user.save({ session });
     console.log('تم إنشاء المستخدم:', user.email);
 
-    // إرسال بريد إلكتروني للمستخدم مع بيانات الاعتماد
     try {
       await sendEmail({
         to: joinRequest.email,
@@ -220,7 +205,6 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني', error: emailError.message });
     }
 
-    // تأكيد المعاملة وإنهاء الجلسة
     await session.commitTransaction();
     session.endSession();
     res.json({
@@ -234,7 +218,7 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     res.status(500).json({ message: 'فشل في الموافقة على الطلب', error: error.message });
   }
 });
-// Reject a join request
+
 router.post('/join-requests/:id/reject', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const joinRequest = await JoinRequest.findById(req.params.id);
@@ -255,7 +239,6 @@ router.post('/join-requests/:id/reject', authMiddleware, adminMiddleware, async 
   }
 });
 
-// Delete an approved member
 router.delete('/members/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -287,7 +270,8 @@ router.delete('/members/:id', authMiddleware, adminMiddleware, async (req, res) 
       return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
     }
 
-    // Delete profile image from Cloudinary if exists
+    console.log('محاولة حذف العضو:', { memberId, email: joinRequest.email, userId: user._id, adminId: req.userId });
+
     if (user.profileImagePublicId) {
       try {
         await cloudinary.uploader.destroy(user.profileImagePublicId);
@@ -302,7 +286,7 @@ router.delete('/members/:id', authMiddleware, adminMiddleware, async (req, res) 
 
     await session.commitTransaction();
     session.endSession();
-    console.log('تم حذف العضو:', { memberId, email: joinRequest.email });
+    console.log('تم حذف العضو بنجاح:', { memberId, email: joinRequest.email });
     res.json({ message: 'تم حذف العضو بنجاح' });
   } catch (error) {
     console.error('خطأ في حذف العضو:', error.message);
@@ -312,7 +296,6 @@ router.delete('/members/:id', authMiddleware, adminMiddleware, async (req, res) 
   }
 });
 
-// Get all approved members with details
 router.get('/approved-members', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const approvedMembers = await JoinRequest.find({ status: 'Approved' });
@@ -347,7 +330,6 @@ router.get('/approved-members', authMiddleware, adminMiddleware, async (req, res
   }
 });
 
-// Get member details by ID
 router.get('/members/:id', authMiddleware, async (req, res) => {
   try {
     const member = await JoinRequest.findById(req.params.id);
@@ -360,7 +342,7 @@ router.get('/members/:id', authMiddleware, async (req, res) => {
       studentName: user.students.find(s => s.email.toLowerCase() === lecture.studentEmail.toLowerCase())?.name || 'Unknown'
     })) || [];
     res.json({
-      success: true, // إضافة حقل success لتتناسب مع JoinRequestResponse
+      success: true,
       member: {
         id: member._id,
         name: member.name,
@@ -386,7 +368,6 @@ router.get('/members/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Update member details
 router.put('/members/:id/update-details', authMiddleware, adminMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -460,7 +441,6 @@ router.put('/members/:id/update-details', authMiddleware, adminMiddleware, async
       return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
     }
 
-    // Fix invalid lectures by removing entries with missing or invalid studentEmail
     if (Array.isArray(user.lectures)) {
       const originalLectureCount = user.lectures.length;
       user.lectures = user.lectures.filter(lecture => lecture.studentEmail && validator.isEmail(lecture.studentEmail));
@@ -513,7 +493,6 @@ router.put('/members/:id/update-details', authMiddleware, adminMiddleware, async
   }
 });
 
-// Add a single student to a member
 router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -569,7 +548,6 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'حساب المستخدم غير موجود' });
     }
 
-    // التحقق من الحد الأقصى لعدد الطلاب (مثال: 50)
     const MAX_STUDENTS = 50;
     if (user.students.length >= MAX_STUDENTS) {
       await session.abortTransaction();
@@ -587,7 +565,6 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'البريد الإلكتروني للطالب مستخدم بالفعل' });
     }
 
-    // التحقق من أن المواد موجودة في قائمة المستخدم
     if (subjects && Array.isArray(subjects)) {
       const userSubjects = user.subjects.map(s => s.toLowerCase());
       const invalidSubjects = subjects.filter(subject => !userSubjects.includes(subject.name.toLowerCase()));
@@ -610,7 +587,7 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
     };
     user.students.push(newStudent);
     member.students.push(newStudent);
-    user.numberOfStudents = (user.numberOfStudents || 0) + 1;
+    user.numberOfUsers = (user.numberOfUsers || 0) + 1;
 
     if (!Array.isArray(user.subjects)) user.subjects = [];
     if (!Array.isArray(member.subjects)) member.subjects = [];
@@ -621,7 +598,6 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
       member.subjects = [...new Set([...member.subjects, ...subjectNames])];
     }
 
-    // تحديث ساعات التطوع
     member.volunteerHours = (member.volunteerHours || 0) + 1;
 
     await Promise.all([member.save({ session }), user.save({ session })]);
@@ -632,13 +608,13 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
     console.log('تم إضافة الطالب:', { 
       memberId: member._id, 
       studentEmail: normalizedEmail, 
-      numberOfStudents: user.numberOfStudents 
+      numberOfUsers: user.numberOfUsers 
     });
 
     res.json({
       message: 'تم إضافة الطالب بنجاح',
       student: newStudent,
-      numberOfStudents: user.numberOfStudents,
+      numberOfUsers: user.numberOfUsers,
       subjects: user.subjects
     });
   } catch (error) {
@@ -649,7 +625,6 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
   }
 });
 
-// Login
 router.post('/login', async (req, res) => {
   try {
     console.log('Login request received:', req.body);
@@ -696,7 +671,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get user profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
@@ -718,7 +692,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
     console.log('تم جلب الملف الشخصي:', {
       userId: req.userId,
       email: user.email,
-      numberOfStudents: user.numberOfStudents
+      numberOfUsers: user.numberOfUsers
     });
 
     res.json({
@@ -729,7 +703,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
           id: user._id,
           email: user.email,
           profileImage: user.profileImage || null,
-          numberOfStudents: user.numberOfStudents || 0,
+          numberOfUsers: user.numberOfUsers || 0,
           subjects: user.subjects || [],
           students: user.students || [],
           meetings: user.meetings || [],
@@ -757,7 +731,6 @@ router.get('/profile', authMiddleware, async (req, res) => {
   }
 });
 
-// Update password
 router.put('/profile/password', authMiddleware, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -787,7 +760,6 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload profile image to Cloudinary
 router.post('/profile/image', authMiddleware, upload.single('profileImage'), async (req, res) => {
   try {
     if (!req.file) {
@@ -806,7 +778,6 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
       return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
     }
 
-    // Delete old image from Cloudinary if exists
     if (user.profileImagePublicId) {
       try {
         await cloudinary.uploader.destroy(user.profileImagePublicId);
@@ -816,7 +787,6 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
       }
     }
 
-    // Upload new image to Cloudinary
     const uploadResult = await new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
         {
@@ -859,7 +829,6 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
   }
 });
 
-// Delete profile image
 router.delete('/profile/image', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
@@ -889,7 +858,6 @@ router.delete('/profile/image', authMiddleware, async (req, res) => {
   }
 });
 
-// Add a meeting to calendar
 router.post('/profile/meetings', authMiddleware, async (req, res) => {
   try {
     const { title, date, startTime, endTime } = req.body;
@@ -929,7 +897,6 @@ router.post('/profile/meetings', authMiddleware, async (req, res) => {
   }
 });
 
-// Update a meeting
 router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const { title, date, startTime, endTime } = req.body;
@@ -983,7 +950,6 @@ router.put('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete a meeting
 router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) => {
   try {
     const meetingId = req.params.meetingId;
@@ -1024,7 +990,6 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
   }
 });
 
-// Request password reset
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -1042,7 +1007,7 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenExpire = Date.now() + 3600000; // 1 hour expiration
+    const tokenExpire = Date.now() + 3600000;
 
     user.resetToken = resetToken;
     user.tokenExpire = tokenExpire;
@@ -1072,7 +1037,6 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Manually send meeting reminder
 router.post('/profile/meetings/:meetingId/remind', authMiddleware, async (req, res) => {
   try {
     const meetingId = req.params.meetingId;
@@ -1110,8 +1074,6 @@ router.post('/profile/meetings/:meetingId/remind', authMiddleware, async (req, r
   }
 });
 
-
-// Send a message
 router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { userId, content, displayDays } = req.body;
@@ -1191,7 +1153,6 @@ router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, 
   }
 });
 
-// Edit a message
 router.put('/admin/edit-message', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { userId, messageId, content, displayDays } = req.body;
@@ -1239,7 +1200,6 @@ router.put('/admin/edit-message', authMiddleware, adminMiddleware, async (req, r
   }
 });
 
-// Delete a message
 router.delete('/admin/delete-message', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { userId, messageId } = req.body;
@@ -1277,7 +1237,6 @@ router.delete('/admin/delete-message', authMiddleware, adminMiddleware, async (r
   }
 });
 
-// Get a message by ID
 router.get('/admin/get-message/:userId/:messageId', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { userId, messageId } = req.params;
@@ -1324,7 +1283,6 @@ router.get('/admin/get-message/:userId/:messageId', authMiddleware, adminMiddlew
   }
 });
 
-// Get members with low lecture counts
 router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const approvedMembers = await JoinRequest.find({ status: 'Approved' });

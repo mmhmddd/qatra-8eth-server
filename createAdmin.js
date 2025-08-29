@@ -63,7 +63,7 @@ const createAdminUser = async (email, password) => {
 // Execute the script
 const run = async () => {
   await connectDB();
-  await createAdminUser('medo27383298@gmail.com', '111111'); // غير البريد وكلمة المرور حسب الحاجة
+  await createAdminUser('medo27383298@gmail.com', '111111');
 };
 
 run();

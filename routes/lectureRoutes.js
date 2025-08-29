@@ -110,7 +110,7 @@ router.post('/', authMiddleware, async (req, res) => {
     };
     user.lectures.push(lecture);
     user.lectureCount = (user.lectureCount || 0) + 1;
-    joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 2;
+    joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 1;
 
     // Delete related low lecture count notifications
     await Notification.deleteMany(
