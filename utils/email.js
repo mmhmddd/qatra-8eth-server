@@ -5,7 +5,7 @@ const sendEmail = async ({ to, subject, text, html }) => {
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT,
-      secure: false, 
+      secure: false,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -16,10 +16,11 @@ const sendEmail = async ({ to, subject, text, html }) => {
       from: `"Qatrah Ghaith" <${process.env.SMTP_USER}>`,
       to,
       subject,
-      text: text || html?.replace(/<[^>]+>/g, ''),
       html,
+      text: html ? undefined : text // لا ترسل text إذا كان هناك html
     };
 
+    console.log('محتوى HTML المرسل:', html?.slice(0, 100));
     const info = await transporter.sendMail(mailOptions);
     console.log('✅ Email sent successfully to:', to, 'Response:', info.response);
     return info;

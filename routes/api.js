@@ -9,10 +9,13 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
+import { existsSync } from 'fs';
 import sendEmail from '../utils/email.js';
 import validator from 'validator';
 import { v2 as cloudinary } from 'cloudinary';
 import crypto from 'crypto';
+import handlebars from 'handlebars';
 
 const router = express.Router();
 
@@ -25,6 +28,31 @@ cloudinary.config({
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// وظيفة لقراءة وتجميع قالب البريد الإلكتروني
+async function getEmailTemplate(data) {
+  try {
+    const templatePath = path.join(__dirname, '../reset-password-email.html');
+    console.log('مسار ملف القالب:', templatePath);
+    console.log('هل ملف القالب موجود؟', existsSync(templatePath));
+    if (!existsSync(templatePath)) {
+      throw new Error(`ملف القالب غير موجود في المسار: ${templatePath}`);
+    }
+    const source = await fsPromises.readFile(templatePath, 'utf8');
+    console.log('تم قراءة ملف القالب بنجاح:', source.slice(0, 100));
+    const template = handlebars.compile(source);
+    console.log('تم تجميع القالب بنجاح');
+    const htmlContent = template(data);
+    console.log('تم إنشاء محتوى HTML:', htmlContent.slice(0, 100));
+    if (!htmlContent) {
+      throw new Error('فشل في إنشاء محتوى HTML من القالب');
+    }
+    return htmlContent;
+  } catch (error) {
+    console.error('خطأ في قراءة أو تجميع القالب:', error.message, error.stack);
+    throw error;
+  }
+}
 
 const storage = multer.memoryStorage();
 
@@ -991,48 +1019,66 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
 });
 
 router.post('/forgot-password', async (req, res) => {
+  console.log('تم استلام طلب POST إلى /api/forgot-password مع البيانات:', req.body);
   try {
     const { email } = req.body;
     if (!email) {
+      console.log('خطأ: البريد الإلكتروني غير موجود في الطلب');
       return res.status(400).json({ message: 'البريد الإلكتروني مطلوب' });
     }
     if (!validator.isEmail(email)) {
+      console.log('خطأ: البريد الإلكتروني غير صالح:', email);
       return res.status(400).json({ message: 'البريد الإلكتروني غير صالح' });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+    console.log('البريد الإلكتروني المطبع:', normalizedEmail);
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
+      console.log('خطأ: لا يوجد مستخدم بهذا البريد:', normalizedEmail);
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenExpire = Date.now() + 3600000;
+    const tokenExpire = Date.now() + 3600000; // الرمز صالح لمدة ساعة واحدة
+    console.log('تم إنشاء رمز إعادة التعيين:', resetToken);
 
     user.resetToken = resetToken;
     user.tokenExpire = tokenExpire;
     await user.save();
+    console.log('تم حفظ رمز إعادة التعيين للمستخدم:', normalizedEmail);
 
     const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password/${resetToken}`;
-    const message = `مرحبًا,\n\nلقد طلبت إعادة تعيين كلمة المرور. يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور الخاصة بك:\n${resetUrl}\n\nهذا الرابط صالح لمدة ساعة واحدة فقط.\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.\n\nتحياتنا,\nفريق الإدارة`;
+    console.log('رابط إعادة التعيين:', resetUrl);
 
     try {
+      console.log('جارٍ استدعاء getEmailTemplate مع البيانات:', { name: user.name || 'المستخدم', resetUrl });
+      const htmlContent = await getEmailTemplate({
+        name: user.name || 'المستخدم',
+        resetUrl
+      });
+      console.log('تم إنشاء htmlContent:', htmlContent.slice(0, 100));
+      if (!htmlContent) {
+        throw new Error('فشل في إنشاء محتوى HTML للبريد الإلكتروني');
+      }
+
       await sendEmail({
         to: normalizedEmail,
         subject: 'إعادة تعيين كلمة المرور',
-        text: message,
+        html: htmlContent
       });
+
       console.log('تم إرسال بريد إلكتروني لإعادة تعيين كلمة المرور إلى:', normalizedEmail);
       res.json({ message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' });
     } catch (emailError) {
-      console.error('فشل إرسال بريد إلكتروني لإعادة تعيين كلمة المرور:', emailError.message);
+      console.error('فشل إرسال بريد إعادة التعيين:', emailError.message, emailError.stack);
       user.resetToken = null;
       user.tokenExpire = null;
       await user.save();
-      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني', error: emailError.message });
+      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني، حاول مرة أخرى لاحقًا', error: emailError.message });
     }
   } catch (error) {
-    console.error('خطأ في طلب إعادة تعيين كلمة المرور:', error.message);
+    console.error('خطأ في طلب إعادة تعيين كلمة المرور:', error.message, error.stack);
     res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });

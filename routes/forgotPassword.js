@@ -57,7 +57,7 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // إعادة تعيين كلمة المرور
-router.post('/reset-password/:token', async (req, res) => {
+router.post('/:token', async (req, res) => {
   try {
     const { token } = req.params;
     const { newPassword } = req.body;

@@ -4,10 +4,11 @@ import { config } from 'dotenv';
 import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs/promises';
+import fsPromises from 'fs/promises';
 import { fileURLToPath } from 'url';
 import cloudinary from 'cloudinary';
 import cron from 'node-cron';
+import handlebars from 'handlebars';
 import User from './models/User.js';
 import sendEmail from './utils/email.js';
 
@@ -31,18 +32,19 @@ if (!process.env.MONGODB_URI) {
 }
 
 if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.error(' Error: Cloudinary credentials are missing in .env file');
+  console.error('Error: Cloudinary credentials are missing in .env file');
   process.exit(1);
 }
 
 if (!process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.SMTP_HOST || !process.env.SMTP_PORT) {
-  console.error(' Error: SMTP credentials are missing in .env file');
+  console.error('Error: SMTP credentials are missing in .env file');
   process.exit(1);
 }
 
 if (!process.env.PORT) {
   console.warn('⚠️ Warning: PORT is not defined in .env file, defaulting to 5000');
 }
+
 if (!process.env.FRONTEND_URL) {
   console.warn('⚠️ Warning: FRONTEND_URL is not defined in .env file, defaulting to https://www.qatrah-ghaith.com');
 }
@@ -86,6 +88,23 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// قراءة قالب البريد الإلكتروني لتذكير الاجتماعات
+async function getEmailTemplate(data) {
+  try {
+    const templatePath = path.join(__dirname, 'meeting-reminder.html');
+    console.log('مسار قالب تذكير الاجتماعات:', templatePath);
+    const source = await fsPromises.readFile(templatePath, 'utf8');
+    console.log('تم قراءة قالب تذكير الاجتماعات بنجاح:', source.slice(0, 100));
+    const template = handlebars.compile(source);
+    const htmlContent = template(data);
+    console.log('تم إنشاء محتوى HTML لتذكير الاجتماعات:', htmlContent.slice(0, 100));
+    return htmlContent;
+  } catch (error) {
+    console.error('خطأ في قراءة أو تجميع قالب تذكير الاجتماعات:', error.message, error.stack);
+    throw error;
+  }
+}
+
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com',
   credentials: true
@@ -118,8 +137,11 @@ app.use('/api/gallery', galleryRoutes);
 console.log('Registering Lecture Request routes at /api/lecture-requests');
 app.use('/api/lecture-requests', lectureRequestRoutes);
 
-console.log('Registering Forget Password routes at /api');
-app.use('/api', forgetPasswordRoutes);
+console.log('Registering Forget Password routes at /api/forgot-password');
+app.use('/api/forgot-password', forgetPasswordRoutes);
+
+console.log('Registering Forget Password routes at /api/reset-password');
+app.use('/api/reset-password', forgetPasswordRoutes);
 
 console.log('Registering Message routes at /api/messages');
 app.use('/api/messages', messageRoutes);
@@ -171,20 +193,18 @@ cron.schedule('1 0 * * *', async () => {
       `).join('');
 
       console.log(`Sending daily reminder to ${user.email} for ${meetingsToRemind.length} meetings`);
+      const htmlContent = await getEmailTemplate({
+        name: user.name || 'المستخدم',
+        meetingsCount: meetingsToRemind.length,
+        plural: meetingsToRemind.length > 1,
+        meetingList
+      });
+
       emailPromises.push(
         sendEmail({
           to: user.email,
           subject: 'تذكير بمواعيد اليوم',
-          html: `
-            <h2>تذكير بمواعيد اليوم</h2>
-            <p>مرحبًا،</p>
-            <p>لديك ${meetingsToRemind.length} موعد${meetingsToRemind.length > 1 ? 'ات' : ''} اليوم:</p>
-            <ul>
-              ${meetingList}
-            </ul>
-            <p>يرجى الاستعداد للمواعيد.</p>
-            <p>تحياتنا،<br>فريق قطرة غيث</p>
-          `,
+          html: htmlContent
         }).then(() => {
           console.log(`✅ Successfully sent daily reminder to ${user.email} for ${meetingsToRemind.length} meetings`);
           const updatePromises = meetingsToRemind.map(meeting =>
@@ -195,7 +215,7 @@ cron.schedule('1 0 * * *', async () => {
           );
           return Promise.all(updatePromises);
         }).catch((error) => {
-          console.error(` Failed to send daily reminder to ${user.email}:`, error.message);
+          console.error(`Failed to send daily reminder to ${user.email}:`, error.message);
           throw error;
         })
       );
@@ -204,7 +224,7 @@ cron.schedule('1 0 * * *', async () => {
     await Promise.all(emailPromises);
     console.log(`Processed ${emailPromises.length} daily meeting reminders`);
   } catch (error) {
-    console.error(' Error in daily meeting reminder cron job:', error.message, error.stack);
+    console.error('Error in daily meeting reminder cron job:', error.message, error.stack);
   }
 });
 
@@ -214,4 +234,4 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(` Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

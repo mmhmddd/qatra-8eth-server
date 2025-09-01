@@ -1,3 +1,4 @@
+// Updated file: models/User.js
 import { Schema, model } from 'mongoose';
 
 const userSchema = new Schema({
@@ -5,7 +6,7 @@ const userSchema = new Schema({
     type: String,
     required: true,
     unique: true,
-    lowercase: true, // Ensure email is stored in lowercase
+    lowercase: true, 
     trim: true
   },
   password: {
@@ -64,9 +65,11 @@ const userSchema = new Schema({
     subject: { type: String, required: true },
     studentEmail: { type: String, required: true, lowercase: true, trim: true },
     createdAt: { type: Date, default: Date.now },
+    lectureDate: { type: Date, default: Date.now },
+    duration: { type: Number, default: 1 },
     _id: { type: Schema.Types.ObjectId, auto: true }
   }],
-lowLectureWeekCount: {
+  lowLectureWeekCount: {
     type: Number,
     default: 0,
     min: 0

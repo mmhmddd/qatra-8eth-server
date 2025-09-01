@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      direction: rtl;
+      text-align: right;
+    }
+    .container {
+      max-width: 660px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+    }
+    .header {
+      background-color: #aac8ce;
+      padding: 12px 24px;
+      border-radius: 21px 21px 0 0;
+    }
+    .content {
+      padding: 24px;
+    }
+    h2 {
+      color: #333;
+      font-size: 24px;
+      margin: 0 0 16px;
+    }
+    p {
+      color: #555;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0;
+    }
+    li {
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .social-icons {
+      text-align: center;
+      padding: 12px 0;
+    }
+    .social-icons a {
+      margin: 0 12px;
+      display: inline-block;
+    }
+    .footer {
+      background-color: #f4f4f4;
+      padding: 12px 16px;
+      font-size: 11px;
+      text-align: center;
+      color: #555;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 21px;
+    }
+  </style>
+</head>
+<body>
+  <center>
+    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4">
+      <tbody>
+        <tr>
+          <td align="center" valign="top">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px">
+              <tbody>
+                <tr>
+                  <td class="header" valign="top">
+                    <img alt="Meeting Reminder" src="https://ci3.googleusercontent.com/meips/ADKq_NYRA1XHS69DPva5Oot2THVgM2tBE635h0yMVp-smJ07bvT_lxx9It8GAuNyPTSlt_EjqFS5whAyjbzo28ds7nrFGzzmOFgI8N6ew9_hLjIA7dzqCnLuZ_Qoh_ifRg6A5Yox7soU_Q_DDM2bGeM4uZYkJO50sWEzfjA=s0-d-e1-ft#https://mcusercontent.com/a2e94724284edb95af8dd8689/images/e8f1d593-e455-082e-8ff1-d6b4ca9c2978.jpg" width="612">
+                  </td>
+                </tr>
+                <tr>
+                  <td class="content" valign="top">
+                    <h2>تذكير بمواعيد اليوم</h2>
+                    <p>مرحبًا {{name}}،</p>
+                    <p>لديك {{meetingsCount}} موعد{{#if plural}}ات{{/if}} اليوم:</p>
+                    <ul>
+                      {{{meetingList}}}
+                    </ul>
+                    <p>يرجى الاستعداد للمواعيد.</p>
+                    <p>تحياتنا،<br>فريق قطرة غيث</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="social-icons" valign="top">
+                    <a href="https://www.facebook.com/share/g/16JWNuk6zw/?mibextid=wwXIfr" target="_blank">
+                      <img width="24" height="24" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v3/block-icons-v3/facebook-outline-light-40.png">
+                    </a>
+                    <a href="https://www.instagram.com/qatrah_ghaith?igsh=OGNvNDU1MGxpMWNs" target="_blank">
+                      <img width="24" height="24" alt="Instagram icon" src="https://cdn-images.mailchimp.com/icons/social-block-v3/block-icons-v3/instagram-outline-light-40.png">
+                    </a>
+                    <a href="https://x.com/QatrahGhaith" target="_blank">
+                      <img width="24" height="24" alt="X icon" src="https://cdn-images.mailchimp.com/icons/social-block-v3/block-icons-v3/twitter-outline-light-40.png">
+                    </a>
+                    <a href="https://www.qatrah-ghaith.com/home" target="_blank">
+                      <img width="24" height="24" alt="Website icon" src="https://cdn-images.mailchimp.com/icons/social-block-v3/block-icons-v3/website-outline-light-40.png">
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="footer" valign="top">
+                    <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </center>
+</body>
+</html>

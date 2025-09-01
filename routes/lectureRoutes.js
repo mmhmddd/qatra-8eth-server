@@ -4,9 +4,11 @@ import User from '../models/User.js';
 import JoinRequest from '../models/JoinRequest.js';
 import Notification from '../models/Notification.js';
 import LowLectureReport from '../models/LowLectureReport.js';
+import DriveLectureRequest from '../models/DriveLectureRequest.js';
 import validator from 'validator';
 import mongoose from 'mongoose';
 import cron from 'node-cron';
+import sendEmail from '../utils/email.js';
 
 const router = express.Router();
 
@@ -38,18 +40,18 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-// Add a lecture
+// Submit a lecture request
 router.post('/', authMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { link, name, subject, studentEmail } = req.body;
+    const { link, name, subject, studentEmail, lectureDate, duration } = req.body;
 
     // Validate input
-    if (!link || !name || !subject || !studentEmail) {
+    if (!link || !name || !subject || !studentEmail || !lectureDate || !duration) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ message: 'Lecture link, name, subject, and student email are required' });
+      return res.status(400).json({ message: 'Lecture link, name, subject, student email, date, and duration are required' });
     }
     if (!validator.isURL(link, { require_protocol: true })) {
       await session.abortTransaction();
@@ -71,6 +73,18 @@ router.post('/', authMiddleware, async (req, res) => {
       session.endSession();
       return res.status(400).json({ message: 'Invalid student email' });
     }
+    const parsedDate = new Date(lectureDate);
+    if (isNaN(parsedDate.getTime())) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid lecture date' });
+    }
+    const parsedDuration = parseFloat(duration);
+    if (isNaN(parsedDuration) || parsedDuration <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Duration must be a positive number' });
+    }
 
     const normalizedStudentEmail = studentEmail.toLowerCase().trim();
     const user = await User.findById(req.userId).session(session);
@@ -89,11 +103,130 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Student not found' });
     }
 
+    // Create lecture request
+    const lectureRequest = new DriveLectureRequest({
+      userId: req.userId,
+      link,
+      name,
+      subject,
+      studentEmail: normalizedStudentEmail,
+      lectureDate: parsedDate,
+      duration: parsedDuration,
+      createdAt: new Date()
+    });
+    await lectureRequest.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log('Lecture request submitted successfully:', {
+      userId: req.userId,
+      link,
+      name,
+      subject,
+      studentEmail: normalizedStudentEmail,
+      lectureDate,
+      duration
+    });
+
+    res.json({
+      success: true,
+      message: 'Lecture request submitted successfully',
+      request: lectureRequest
+    });
+  } catch (error) {
+    console.error('Error submitting lecture request:', error.message);
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// Get all pending lecture requests (admin only)
+router.get('/requests', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const requests = await DriveLectureRequest.find({ status: 'pending' })
+      .populate('userId', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Fetch JoinRequest for each user to use as a fallback for name
+    const requestsWithUserNames = await Promise.all(
+      requests.map(async (req) => {
+        let userName = req.userId.name;
+        // If user.name is missing, try fetching from JoinRequest
+        if (!userName) {
+          const joinRequest = await JoinRequest.findOne({ email: req.userId.email.toLowerCase().trim() }).lean();
+          userName = joinRequest?.name || 'Unknown';
+        }
+        return {
+          _id: req._id.toString(),
+          link: req.link,
+          name: req.name,
+          subject: req.subject,
+          studentEmail: req.studentEmail,
+          lectureDate: req.lectureDate.toISOString(),
+          duration: req.duration,
+          createdAt: req.createdAt.toISOString(),
+          status: req.status,
+          adminNote: req.adminNote || '',
+          user: {
+            _id: req.userId._id.toString(),
+            name: userName,
+            email: req.userId.email
+          }
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      message: 'Pending lecture requests fetched successfully',
+      requests: requestsWithUserNames
+    });
+  } catch (error) {
+    console.error('Error fetching lecture requests:', error.message);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// Accept a lecture request (admin only)
+router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const requestId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid request ID' });
+    }
+
+    const lectureRequest = await DriveLectureRequest.findById(requestId).populate('userId', 'email').session(session);
+    if (!lectureRequest || lectureRequest.status !== 'pending') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Pending lecture request not found' });
+    }
+
+    const user = await User.findById(lectureRequest.userId._id).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const normalizedStudentEmail = lectureRequest.studentEmail;
+    if (!Array.isArray(user.students) || !user.students.some(s => s.email.toLowerCase().trim() === normalizedStudentEmail)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Student not found' });
+    }
+
     const joinRequest = await JoinRequest.findOne({ email: user.email.toLowerCase().trim() }).session(session);
     if (!joinRequest) {
       await session.abortTransaction();
       session.endSession();
-      console.error('Join request not found for user:', user.email);
       return res.status(404).json({ message: 'Join request not found' });
     }
 
@@ -102,11 +235,13 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Create lecture
     const lecture = {
-      link,
-      name,
-      subject,
+      link: lectureRequest.link,
+      name: lectureRequest.name,
+      subject: lectureRequest.subject,
       studentEmail: normalizedStudentEmail,
-      createdAt: new Date()
+      createdAt: lectureRequest.createdAt,
+      lectureDate: lectureRequest.lectureDate,
+      duration: lectureRequest.duration
     };
     user.lectures.push(lecture);
     user.lectureCount = (user.lectureCount || 0) + 1;
@@ -115,9 +250,9 @@ router.post('/', authMiddleware, async (req, res) => {
     // Delete related low lecture count notifications
     await Notification.deleteMany(
       {
-        userId: req.userId,
+        userId: user._id,
         type: 'low_lecture_count_per_subject',
-        'lectureDetails.subject': subject,
+        'lectureDetails.subject': lectureRequest.subject,
         'lectureDetails.studentEmail': normalizedStudentEmail
       },
       { session }
@@ -125,12 +260,17 @@ router.post('/', authMiddleware, async (req, res) => {
 
     // Create notification
     const notification = new Notification({
-      userId: req.userId,
-      message: `New lecture added by ${user.email}: ${name} (${subject}) - ${link}`,
+      userId: user._id,
+      message: `New lecture added by ${user.email}: ${lectureRequest.name} (${lectureRequest.subject}) - ${lectureRequest.link}`,
       type: 'lecture_added',
-      lectureDetails: { link, name, subject, studentEmail: normalizedStudentEmail }
+      lectureDetails: { link: lectureRequest.link, name: lectureRequest.name, subject: lectureRequest.subject, studentEmail: normalizedStudentEmail }
     });
     await notification.save({ session });
+
+    // Update request status
+    lectureRequest.status = 'accepted';
+    lectureRequest.adminActionAt = new Date();
+    await lectureRequest.save({ session });
 
     // Save changes
     await Promise.all([user.save({ session }), joinRequest.save({ session })]);
@@ -138,27 +278,124 @@ router.post('/', authMiddleware, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    console.log('Lecture added successfully:', {
-      userId: req.userId,
-      link,
-      name,
-      subject,
-      studentEmail: normalizedStudentEmail,
-      lectureCount: user.lectureCount,
-      volunteerHours: joinRequest.volunteerHours
+    // Send email to user
+    await sendEmail({
+      to: user.email,
+      subject: 'Lecture Request Accepted',
+      html: `
+        <h2>Lecture Request Accepted</h2>
+        <p>Your lecture "${lectureRequest.name}" has been accepted by the admin.</p>
+        <p>Details:</p>
+        <ul>
+          <li><strong>Subject:</strong> ${lectureRequest.subject}</li>
+          <li><strong>Student Email:</strong> ${lectureRequest.studentEmail}</li>
+          <li><strong>Date:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+          <li><strong>Duration:</strong> ${lectureRequest.duration} hours</li>
+        </ul>
+        <p>Thank you for your contribution!</p>
+      `
     });
+
+    console.log('Lecture request accepted successfully:', { requestId, userId: user._id });
 
     res.json({
       success: true,
-      message: 'Lecture added successfully',
+      message: 'Lecture request accepted successfully',
       lecture,
       lectureCount: user.lectureCount,
       volunteerHours: joinRequest.volunteerHours
     });
   } catch (error) {
-    console.error('Error adding lecture:', error.message);
+    console.error('Error accepting lecture request:', error.message);
     await session.abortTransaction();
     session.endSession();
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// Reject a lecture request (admin only)
+router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const requestId = req.params.id;
+    const { note } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid request ID' });
+    }
+
+    const lectureRequest = await DriveLectureRequest.findById(requestId).populate('userId', 'email').session(session);
+    if (!lectureRequest || lectureRequest.status !== 'pending') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Pending lecture request not found' });
+    }
+
+    // Update request status
+    lectureRequest.status = 'rejected';
+    lectureRequest.adminActionAt = new Date();
+    lectureRequest.adminNote = note || '';
+    await lectureRequest.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Send email to user
+    await sendEmail({
+      to: lectureRequest.userId.email,
+      subject: 'Lecture Request Rejected',
+      html: `
+        <h2>Lecture Request Rejected</h2>
+        <p>Your lecture "${lectureRequest.name}" has been rejected by the admin.</p>
+        ${note ? `<p>Reason: ${note}</p>` : ''}
+        <p>Details:</p>
+        <ul>
+          <li><strong>Subject:</strong> ${lectureRequest.subject}</li>
+          <li><strong>Student Email:</strong> ${lectureRequest.studentEmail}</li>
+          <li><strong>Date:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+          <li><strong>Duration:</strong> ${lectureRequest.duration} hours</li>
+        </ul>
+        <p>Please contact admin for more details.</p>
+      `
+    });
+
+    console.log('Lecture request rejected successfully:', { requestId });
+
+    res.json({
+      success: true,
+      message: 'Lecture request rejected successfully'
+    });
+  } catch (error) {
+    console.error('Error rejecting lecture request:', error.message);
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// Delete a lecture request (admin only)
+router.delete('/requests/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      return res.status(400).json({ message: 'Invalid request ID' });
+    }
+
+    const lectureRequest = await DriveLectureRequest.findByIdAndDelete(requestId);
+    if (!lectureRequest) {
+      return res.status(404).json({ message: 'Lecture request not found' });
+    }
+
+    console.log('Lecture request deleted successfully:', { requestId });
+
+    res.json({
+      success: true,
+      message: 'Lecture request deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting lecture request:', error.message);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
@@ -562,7 +799,8 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
 
           // Count lectures for this student and subject in the last week
           const lectureCount = user.lectures.filter(lecture => {
-            const matchesTimeFrame = lecture.createdAt >= weekStart && lecture.createdAt <= weekEnd;
+            const lectureTime = lecture.lectureDate || lecture.createdAt;
+            const matchesTimeFrame = lectureTime >= weekStart && lectureTime <= weekEnd;
             const matchesStudent = lecture.studentEmail?.toLowerCase().trim() === student.email.toLowerCase().trim();
             const matchesSubject = lecture.subject === subject.name;
             return matchesTimeFrame && matchesStudent && matchesSubject;
@@ -634,7 +872,7 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
         
         // Increment counter only in cron job and if not already counted for this week
         if (isCronJob && (!user.lastLowLectureWeek || user.lastLowLectureWeek < weekStart)) {
-          user.lowLectureWeekCount = (user.lectureWeekCount || 0) + 1;
+          user.lowLectureWeekCount = (user.lowLectureWeekCount || 0) + 1;
           user.lastLowLectureWeek = weekStart;
           await user.save({ session: localSession });
           console.log(`Incremented lowLectureWeekCount for ${user.email}: ${user.lowLectureWeekCount}`);
@@ -652,7 +890,9 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
             subject: lecture.subject,
             studentEmail: lecture.studentEmail,
             link: lecture.link,
-            createdAt: lecture.createdAt.toISOString()
+            createdAt: lecture.createdAt.toISOString(),
+            lectureDate: (lecture.lectureDate || lecture.createdAt).toISOString(),
+            duration: lecture.duration || 1
           }))
         });
       } else {
