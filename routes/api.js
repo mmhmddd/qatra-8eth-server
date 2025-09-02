@@ -29,11 +29,11 @@ cloudinary.config({
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// وظيفة لقراءة وتجميع قالب البريد الإلكتروني
-async function getEmailTemplate(data) {
+// وظيفة لقراءة وتجميع قالب بريد إعادة تعيين كلمة المرور
+async function getResetEmailTemplate(data) {
   try {
     const templatePath = path.join(__dirname, '../reset-password-email.html');
-    console.log('مسار ملف القالب:', templatePath);
+    console.log('مسار ملف القالب (إعادة تعيين):', templatePath);
     console.log('هل ملف القالب موجود؟', existsSync(templatePath));
     if (!existsSync(templatePath)) {
       throw new Error(`ملف القالب غير موجود في المسار: ${templatePath}`);
@@ -49,7 +49,32 @@ async function getEmailTemplate(data) {
     }
     return htmlContent;
   } catch (error) {
-    console.error('خطأ في قراءة أو تجميع القالب:', error.message, error.stack);
+    console.error('خطأ في قراءة أو تجميع القالب (إعادة تعيين):', error.message, error.stack);
+    throw error;
+  }
+}
+
+// وظيفة لقراءة وتجميع قالب بريد الموافقة على الطلب
+async function getApprovalEmailTemplate(data) {
+  try {
+    const templatePath = path.join(__dirname, '../accept-email.html');
+    console.log('مسار ملف القالب (موافقة):', templatePath);
+    console.log('هل ملف القالب موجود؟', existsSync(templatePath));
+    if (!existsSync(templatePath)) {
+      throw new Error(`ملف القالب غير موجود في المسار: ${templatePath}`);
+    }
+    const source = await fsPromises.readFile(templatePath, 'utf8');
+    console.log('تم قراءة ملف القالب بنجاح:', source.slice(0, 100));
+    const template = handlebars.compile(source);
+    console.log('تم تجميع القالب بنجاح');
+    const htmlContent = template(data);
+    console.log('تم إنشاء محتوى HTML:', htmlContent.slice(0, 100));
+    if (!htmlContent) {
+      throw new Error('فشل في إنشاء محتوى HTML من القالب');
+    }
+    return htmlContent;
+  } catch (error) {
+    console.error('خطأ في قراءة أو تجميع القالب (موافقة):', error.message, error.stack);
     throw error;
   }
 }
@@ -193,37 +218,54 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       return res.status(400).json({ message: 'البريد الإلكتروني للطلب غير صالح' });
     }
 
-    const existingUser = await User.findOne({ email: joinRequest.email }).session(session);
-    if (existingUser) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'حساب المستخدم موجود بالفعل' });
+    let user = await User.findOne({ email: joinRequest.email.toLowerCase().trim() }).session(session);
+    let randomPassword;
+    if (!user) {
+      randomPassword = crypto.randomBytes(8).toString('hex');
+      console.log('Generated randomPassword:', randomPassword);
+      const hashedPassword = await hash(randomPassword, 10);
+
+      user = new User({
+        email: joinRequest.email.toLowerCase().trim(),
+        password: hashedPassword,
+        numberOfStudents: 0,
+        subjects: joinRequest.subjects || [],
+        students: [],
+        meetings: [],
+        lectures: [],
+        lectureCount: 0,
+        role: 'user',
+        profileImage: null,
+        profileImagePublicId: null
+      });
+      await user.save({ session });
+      console.log('تم إنشاء المستخدم:', user.email);
+    } else {
+      console.log('المستخدم موجود بالفعل:', user.email);
+      user.subjects = [...new Set([...user.subjects, ...(joinRequest.subjects || [])])];
+      await user.save({ session });
     }
 
-    const randomPassword = crypto.randomBytes(8).toString('hex');
-    const hashedPassword = await hash(randomPassword, 10);
-
-    const user = new User({
-      email: joinRequest.email.toLowerCase().trim(),
-      password: hashedPassword,
-      numberOfStudents: 0,
-      subjects: joinRequest.subjects || [],
-      students: [],
-      meetings: [],
-      lectures: [],
-      lectureCount: 0,
-      role: 'user',
-      profileImage: null,
-      profileImagePublicId: null
-    });
-    await user.save({ session });
-    console.log('تم إنشاء المستخدم:', user.email);
-
     try {
+      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/login`;
+      console.log('Data passed to template:', {
+        name: joinRequest.name,
+        email: joinRequest.email,
+        password: randomPassword || null,
+        loginUrl
+      });
+      const htmlContent = await getApprovalEmailTemplate({
+        name: joinRequest.name,
+        email: joinRequest.email,
+        password: randomPassword || null,
+        loginUrl
+      });
+      console.log('Generated htmlContent:', htmlContent.slice(0, 100));
       await sendEmail({
         to: joinRequest.email,
         subject: 'تم الموافقة على طلب الانضمام الخاص بك',
-        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
+        html: htmlContent,
+        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword ? randomPassword : 'استخدم كلمة المرور الحالية'}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
       });
       console.log('تم إرسال البريد الإلكتروني إلى:', joinRequest.email);
     } catch (emailError) {
@@ -236,14 +278,14 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     await session.commitTransaction();
     session.endSession();
     res.json({
-      message: 'تم الموافقة على الطلب وإنشاء الحساب وإرسال كلمة المرور عبر البريد الإلكتروني',
+      message: 'تم الموافقة على الطلب وإرسال بريد إلكتروني بالتفاصيل',
       email: user.email,
     });
   } catch (error) {
     console.error('خطأ في الموافقة على طلب الانضمام:', error.message);
     await session.abortTransaction();
     session.endSession();
-    res.status(500).json({ message: 'فشل في الموافقة على الطلب', error: error.message });
+    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
   }
 });
 
@@ -615,7 +657,7 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
     };
     user.students.push(newStudent);
     member.students.push(newStudent);
-    user.numberOfUsers = (user.numberOfUsers || 0) + 1;
+    user.numberOfStudents = (user.numberOfStudents || 0) + 1;
 
     if (!Array.isArray(user.subjects)) user.subjects = [];
     if (!Array.isArray(member.subjects)) member.subjects = [];
@@ -636,13 +678,13 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
     console.log('تم إضافة الطالب:', { 
       memberId: member._id, 
       studentEmail: normalizedEmail, 
-      numberOfUsers: user.numberOfUsers 
+      numberOfStudents: user.numberOfStudents 
     });
 
     res.json({
       message: 'تم إضافة الطالب بنجاح',
       student: newStudent,
-      numberOfUsers: user.numberOfUsers,
+      numberOfStudents: user.numberOfStudents,
       subjects: user.subjects
     });
   } catch (error) {
@@ -720,7 +762,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
     console.log('تم جلب الملف الشخصي:', {
       userId: req.userId,
       email: user.email,
-      numberOfUsers: user.numberOfUsers
+      numberOfStudents: user.numberOfStudents
     });
 
     res.json({
@@ -731,7 +773,7 @@ router.get('/profile', authMiddleware, async (req, res) => {
           id: user._id,
           email: user.email,
           profileImage: user.profileImage || null,
-          numberOfUsers: user.numberOfUsers || 0,
+          numberOfStudents: user.numberOfStudents || 0,
           subjects: user.subjects || [],
           students: user.students || [],
           meetings: user.meetings || [],
@@ -1052,8 +1094,8 @@ router.post('/forgot-password', async (req, res) => {
     console.log('رابط إعادة التعيين:', resetUrl);
 
     try {
-      console.log('جارٍ استدعاء getEmailTemplate مع البيانات:', { name: user.name || 'المستخدم', resetUrl });
-      const htmlContent = await getEmailTemplate({
+      console.log('جارٍ استدعاء getResetEmailTemplate مع البيانات:', { name: user.name || 'المستخدم', resetUrl });
+      const htmlContent = await getResetEmailTemplate({
         name: user.name || 'المستخدم',
         resetUrl
       });
