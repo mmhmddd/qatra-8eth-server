@@ -284,7 +284,7 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       subject: 'Lecture Request Accepted',
       html: `
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -312,16 +312,32 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       border-radius: 16px;
       margin: 16px;
       border: 2px solid #000000;
+      direction: rtl;
+      text-align: right;
     }
     h2 {
       color: #333;
       font-size: 24px;
       margin: 0 0 16px;
+      text-align: right;
     }
     p {
       color: #555;
       font-size: 16px;
       line-height: 1.6;
+      text-align: right;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0;
+      direction: rtl;
+      text-align: right;
+    }
+    li {
+      margin-bottom: 12px;
+      font-size: 14px;
+      text-align: right;
     }
     .button {
       display: inline-block;
@@ -354,31 +370,31 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
     }
   </style>
 </head>
-<body>
+<body dir="rtl">
   <center>
-    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4">
+    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4; direction: rtl; text-align: right;">
       <tbody>
         <tr>
-          <td align="center" valign="top">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px">
+          <td align="center" valign="top" dir="rtl">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px; direction: rtl; text-align: right;">
               <tbody>
 
                 <tr>
-                  <td class="content" valign="top">
-                    <h2>تم قبول طلب المحاضرة</h2>
-                    <p>تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
-                    <p>التفاصيل:</p>
-                    <ul>
-                      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
-                      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
-                      <li><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-                      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+                  <td class="content" valign="top" dir="rtl" style="direction: rtl; text-align: right;">
+                    <h2 style="text-align: right;">تم قبول طلب المحاضرة</h2>
+                    <p style="text-align: right;">تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+                    <p style="text-align: right;">التفاصيل:</p>
+                    <ul style="text-align: right;">
+                      <li style="text-align: right;"><strong>المادة:</strong> ${lectureRequest.subject}</li>
+                      <li style="text-align: right;"><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+                      <li style="text-align: right;"><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+                      <li style="text-align: right;"><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
                     </ul>
-                    <p>شكراً لمساهمتك!</p>
+                    <p style="text-align: right;">شكراً لمساهمتك!</p>
                   </td>
                 </tr>
                 <tr>
-                  <td class="social-icons" valign="top">
+                  <td class="social-icons" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
                     <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
                       <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
                     </a>
@@ -394,7 +410,7 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
                   </td>
                 </tr>
                 <tr>
-                  <td class="footer" valign="top">
+                  <td class="footer" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
                     <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
                   </td>
                 </tr>
@@ -462,7 +478,7 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
       subject: 'Lecture Request Rejected',
       html: `
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -490,16 +506,32 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
       border-radius: 16px;
       margin: 16px;
       border: 2px solid #000000;
+      direction: rtl;
+      text-align: right;
     }
     h2 {
       color: #333;
       font-size: 24px;
       margin: 0 0 16px;
+      text-align: right;
     }
     p {
       color: #555;
       font-size: 16px;
       line-height: 1.6;
+      text-align: right;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0;
+      direction: rtl;
+      text-align: right;
+    }
+    li {
+      margin-bottom: 12px;
+      font-size: 14px;
+      text-align: right;
     }
     .button {
       display: inline-block;
@@ -532,32 +564,32 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
     }
   </style>
 </head>
-<body>
+<body dir="rtl">
   <center>
-    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4">
+    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4; direction: rtl; text-align: right;">
       <tbody>
         <tr>
-          <td align="center" valign="top">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px">
+          <td align="center" valign="top" dir="rtl">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px; direction: rtl; text-align: right;">
               <tbody>
 
                 <tr>
-                  <td class="content" valign="top">
-                    <h2>تم رفض طلب المحاضرة</h2>
-                    <p>تم رفض محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
-                    ${note ? `<p>السبب: ${note}</p>` : ''}
-                    <p>التفاصيل:</p>
-                    <ul>
-                      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
-                      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
-                      <li><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-                      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+                  <td class="content" valign="top" dir="rtl" style="direction: rtl; text-align: right;">
+                    <h2 style="text-align: right;">تم رفض طلب المحاضرة</h2>
+                    <p style="text-align: right;">تم رفض محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+                    ${note ? `<p style="text-align: right;">السبب: ${note}</p>` : ''}
+                    <p style="text-align: right;">التفاصيل:</p>
+                    <ul style="text-align: right;">
+                      <li style="text-align: right;"><strong>المادة:</strong> ${lectureRequest.subject}</li>
+                      <li style="text-align: right;"><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+                      <li style="text-align: right;"><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+                      <li style="text-align: right;"><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
                     </ul>
-                    <p>يرجى الاتصال بالإدارة لمزيد من التفاصيل.</p>
+                    <p style="text-align: right;">يرجى الاتصال بالإدارة لمزيد من التفاصيل.</p>
                   </td>
                 </tr>
                 <tr>
-                  <td class="social-icons" valign="top">
+                  <td class="social-icons" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
                     <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
                       <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
                     </a>
@@ -573,7 +605,7 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
                   </td>
                 </tr>
                 <tr>
-                  <td class="footer" valign="top">
+                  <td class="footer" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
                     <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
                   </td>
                 </tr>
