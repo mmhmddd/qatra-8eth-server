@@ -283,16 +283,130 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       to: user.email,
       subject: 'Lecture Request Accepted',
       html: `
-        <h2>Lecture Request Accepted</h2>
-        <p>Your lecture "${lectureRequest.name}" has been accepted by the admin.</p>
-        <p>Details:</p>
-        <ul>
-          <li><strong>Subject:</strong> ${lectureRequest.subject}</li>
-          <li><strong>Student Email:</strong> ${lectureRequest.studentEmail}</li>
-          <li><strong>Date:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-          <li><strong>Duration:</strong> ${lectureRequest.duration} hours</li>
-        </ul>
-        <p>Thank you for your contribution!</p>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      direction: rtl;
+      text-align: right;
+    }
+    .container {
+      max-width: 660px;
+      margin: 0 auto;
+      background-color: #71a7b1;
+      border-radius: 8px;
+    }
+    .header {
+      padding: 12px 24px;
+      border-radius: 8px 8px 0 0;
+    }
+    .content {
+      padding: 24px;
+      background-color: #ffffff;
+      border-radius: 16px;
+      margin: 16px;
+      border: 2px solid #000000;
+    }
+    h2 {
+      color: #333;
+      font-size: 24px;
+      margin: 0 0 16px;
+    }
+    p {
+      color: #555;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .button {
+      display: inline-block;
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 5px;
+      margin: 16px 0;
+    }
+    .social-icons {
+      text-align: center;
+      padding: 12px 0;
+    }
+    .social-icons a {
+      margin: 0 21px;
+      display: inline-block;
+    }
+    .footer {
+      background-color: #f4f4f4;
+      padding: 12px 16px;
+      font-size: 11px;
+      text-align: center;
+      color: #555;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <center>
+    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4">
+      <tbody>
+        <tr>
+          <td align="center" valign="top">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px">
+              <tbody>
+
+                <tr>
+                  <td class="content" valign="top">
+                    <h2>تم قبول طلب المحاضرة</h2>
+                    <p>تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+                    <p>التفاصيل:</p>
+                    <ul>
+                      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
+                      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+                      <li><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+                      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+                    </ul>
+                    <p>شكراً لمساهمتك!</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="social-icons" valign="top">
+                    <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
+                      <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
+                    </a>
+                    <a href="https://www.instagram.com/qatrah_ghaith?igsh=OGNvNDU1MGxpMWNs" target="_blank">
+                      <img width="32" height="32" alt="Instagram icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-instagram-48.png">
+                    </a>
+                    <a href="https://x.com/QatrahGhaith" target="_blank">
+                      <img width="32" height="32" alt="X icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-twitter-48.png">
+                    </a>
+                    <a href="https://www.qatrah-ghaith.com/home" target="_blank">
+                      <img width="32" height="32" alt="Website icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-link-48.png">
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="footer" valign="top">
+                    <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </center>
+</body>
+</html>
       `
     });
 
@@ -347,17 +461,131 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
       to: lectureRequest.userId.email,
       subject: 'Lecture Request Rejected',
       html: `
-        <h2>Lecture Request Rejected</h2>
-        <p>Your lecture "${lectureRequest.name}" has been rejected by the admin.</p>
-        ${note ? `<p>Reason: ${note}</p>` : ''}
-        <p>Details:</p>
-        <ul>
-          <li><strong>Subject:</strong> ${lectureRequest.subject}</li>
-          <li><strong>Student Email:</strong> ${lectureRequest.studentEmail}</li>
-          <li><strong>Date:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-          <li><strong>Duration:</strong> ${lectureRequest.duration} hours</li>
-        </ul>
-        <p>Please contact admin for more details.</p>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+      direction: rtl;
+      text-align: right;
+    }
+    .container {
+      max-width: 660px;
+      margin: 0 auto;
+      background-color: #71a7b1;
+      border-radius: 8px;
+    }
+    .header {
+      padding: 12px 24px;
+      border-radius: 8px 8px 0 0;
+    }
+    .content {
+      padding: 24px;
+      background-color: #ffffff;
+      border-radius: 16px;
+      margin: 16px;
+      border: 2px solid #000000;
+    }
+    h2 {
+      color: #333;
+      font-size: 24px;
+      margin: 0 0 16px;
+    }
+    p {
+      color: #555;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .button {
+      display: inline-block;
+      padding: 10px 20px;
+      background-color: #007bff;
+      color: #ffffff;
+      text-decoration: none;
+      border-radius: 5px;
+      margin: 16px 0;
+    }
+    .social-icons {
+      text-align: center;
+      padding: 12px 0;
+    }
+    .social-icons a {
+      margin: 0 21px;
+      display: inline-block;
+    }
+    .footer {
+      background-color: #f4f4f4;
+      padding: 12px 16px;
+      font-size: 11px;
+      text-align: center;
+      color: #555;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <center>
+    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4">
+      <tbody>
+        <tr>
+          <td align="center" valign="top">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px">
+              <tbody>
+
+                <tr>
+                  <td class="content" valign="top">
+                    <h2>تم رفض طلب المحاضرة</h2>
+                    <p>تم رفض محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+                    ${note ? `<p>السبب: ${note}</p>` : ''}
+                    <p>التفاصيل:</p>
+                    <ul>
+                      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
+                      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+                      <li><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
+                      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+                    </ul>
+                    <p>يرجى الاتصال بالإدارة لمزيد من التفاصيل.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="social-icons" valign="top">
+                    <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
+                      <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
+                    </a>
+                    <a href="https://www.instagram.com/qatrah_ghaith?igsh=OGNvNDU1MGxpMWNs" target="_blank">
+                      <img width="32" height="32" alt="Instagram icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-instagram-48.png">
+                    </a>
+                    <a href="https://x.com/QatrahGhaith" target="_blank">
+                      <img width="32" height="32" alt="X icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-twitter-48.png">
+                    </a>
+                    <a href="https://www.qatrah-ghaith.com/home" target="_blank">
+                      <img width="32" height="32" alt="Website icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-link-48.png">
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="footer" valign="top">
+                    <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </center>
+</body>
+</html>
       `
     });
 
