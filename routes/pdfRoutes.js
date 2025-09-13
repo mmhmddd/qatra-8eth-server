@@ -112,7 +112,6 @@ router.get('/list', async (req, res) => {
   }
 });
 
-
 // Delete PDF
 router.delete('/:id', authMiddleware, async (req, res) => {
   console.log('DELETE /api/pdf/:id called', { id: req.params.id, userId: req.userId });
@@ -146,7 +145,7 @@ router.get('/view/:id', authMiddleware, async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'معرف الملف غير صالح' });
     }
-    const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.userId });
+    const pdf = await PDF.findById(req.params.id);
     if (!pdf) {
       console.log('PDF not found for ID:', req.params.id);
       return res.status(404).json({ message: 'الملف غير موجود' });
