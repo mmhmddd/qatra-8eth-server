@@ -400,6 +400,48 @@ router.get('/approved-members', authMiddleware, adminMiddleware, async (req, res
   }
 });
 
+
+
+
+router.delete('/join-requests/:id', authMiddleware, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    
+    // Validate the ID format
+    if (!mongoose.Types.ObjectId.isValid(requestId)) {
+      return res.status(400).json({ message: 'معرف الطلب غير صالح' });
+    }
+
+    // Find the join request
+    const joinRequest = await JoinRequest.findById(requestId);
+    if (!joinRequest) {
+      return res.status(404).json({ message: 'الطلب غير موجود' });
+    }
+
+    // Delete the join request from database
+    await JoinRequest.deleteOne({ _id: requestId });
+    
+    console.log('تم حذف طلب الانضمام:', { 
+      requestId, 
+      email: joinRequest.email, 
+      status: joinRequest.status 
+    });
+    
+    res.json({ 
+      message: 'تم حذف طلب الانضمام بنجاح',
+      deletedRequest: {
+        id: joinRequest._id,
+        name: joinRequest.name,
+        email: joinRequest.email,
+        status: joinRequest.status
+      }
+    });
+  } catch (error) {
+    console.error('خطأ في حذف طلب الانضمام:', error);
+    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+  }
+});
+
 router.get('/members/:id', authMiddleware, async (req, res) => {
   try {
     const member = await JoinRequest.findById(req.params.id);
