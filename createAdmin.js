@@ -66,4 +66,6 @@ const run = async () => {
   await createAdminUser('Mohammadammar5090@gmail.com', 'Omega@2022');
 };
 
+
+
 run();
