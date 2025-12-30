@@ -185,48 +185,91 @@ router.get('/join-requests', authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
+// Fixed approval endpoint with better error handling
 router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  
   try {
+    console.log('=== Approval Request Started ===');
+    console.log('Request ID:', req.params.id);
+    console.log('User:', req.user?.email);
+    
+    // Validate environment variables
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('Missing SMTP configuration');
       await session.abortTransaction();
       session.endSession();
-      return res.status(500).json({ message: 'خطأ في إعدادات البريد الإلكتروني، تحقق من متغيرات البيئة' });
+      return res.status(500).json({ 
+        message: 'خطأ في إعدادات البريد الإلكتروني، تحقق من متغيرات البيئة',
+        error: 'SMTP_CONFIG_MISSING'
+      });
     }
 
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: 'معرف الطلب غير صالح',
+        error: 'INVALID_ID'
+      });
+    }
+
+    // Find join request
     const joinRequest = await JoinRequest.findById(req.params.id).session(session);
     if (!joinRequest) {
+      console.error('Join request not found:', req.params.id);
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ message: 'الطلب غير موجود' });
+      return res.status(404).json({ 
+        message: 'الطلب غير موجود',
+        error: 'REQUEST_NOT_FOUND'
+      });
     }
 
+    // Check status
     if (joinRequest.status !== 'Pending') {
+      console.log('Request already processed:', joinRequest.status);
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ message: 'الطلب تم معالجته مسبقًا' });
+      return res.status(400).json({ 
+        message: `الطلب ${joinRequest.status === 'Approved' ? 'تمت الموافقة عليه' : 'مرفوض'} مسبقًا`,
+        error: 'ALREADY_PROCESSED'
+      });
     }
 
+    // Validate email
+    if (!validator.isEmail(joinRequest.email)) {
+      console.error('Invalid email:', joinRequest.email);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: 'البريد الإلكتروني للطلب غير صالح',
+        error: 'INVALID_EMAIL'
+      });
+    }
+
+    // Update join request status
     joinRequest.status = 'Approved';
     joinRequest.volunteerHours = 0;
     await joinRequest.save({ session });
+    console.log('Join request status updated to Approved');
 
-    if (!validator.isEmail(joinRequest.email)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ message: 'البريد الإلكتروني للطلب غير صالح' });
-    }
-
-    let user = await User.findOne({ email: joinRequest.email.toLowerCase().trim() }).session(session);
-    let randomPassword;
+    // Find or create user
+    const normalizedEmail = joinRequest.email.toLowerCase().trim();
+    let user = await User.findOne({ email: normalizedEmail }).session(session);
+    let randomPassword = null;
+    
     if (!user) {
+      // Generate random password
       randomPassword = crypto.randomBytes(8).toString('hex');
-      console.log('Generated randomPassword:', randomPassword);
+      console.log('Generated password for new user');
+      
       const hashedPassword = await hash(randomPassword, 10);
 
       user = new User({
-        email: joinRequest.email.toLowerCase().trim(),
+        email: normalizedEmail,
         password: hashedPassword,
         numberOfStudents: 0,
         subjects: joinRequest.subjects || [],
@@ -238,54 +281,86 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
         profileImage: null,
         profileImagePublicId: null
       });
+      
       await user.save({ session });
-      console.log('تم إنشاء المستخدم:', user.email);
+      console.log('New user created:', user.email);
     } else {
-      console.log('المستخدم موجود بالفعل:', user.email);
+      console.log('User already exists:', user.email);
+      // Merge subjects
       user.subjects = [...new Set([...user.subjects, ...(joinRequest.subjects || [])])];
       await user.save({ session });
     }
 
+    // Send email with error handling
     try {
-      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/login`;
-      console.log('Data passed to template:', {
+      const loginUrl = `${'https://www.qatrah-ghaith.com' || 'http://localhost:4200'}/login`;
+      
+      console.log('Preparing email data:', {
+        to: joinRequest.email,
         name: joinRequest.name,
-        email: joinRequest.email,
-        password: randomPassword || null,
-        loginUrl
+        hasPassword: !!randomPassword
       });
+
       const htmlContent = await getApprovalEmailTemplate({
         name: joinRequest.name,
         email: joinRequest.email,
-        password: randomPassword || null,
+        password: randomPassword,
         loginUrl
       });
-      console.log('Generated htmlContent:', htmlContent.slice(0, 100));
+
       await sendEmail({
         to: joinRequest.email,
         subject: 'تم الموافقة على طلب الانضمام الخاص بك',
         html: htmlContent,
-        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword ? randomPassword : 'استخدم كلمة المرور الحالية'}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
+        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword || 'استخدم كلمة المرور الحالية'}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
       });
-      console.log('تم إرسال البريد الإلكتروني إلى:', joinRequest.email);
+      
+      console.log('Email sent successfully to:', joinRequest.email);
     } catch (emailError) {
-      console.error('فشل إرسال البريد الإلكتروني:', emailError.message);
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني', error: emailError.message });
+      console.error('Email sending failed:', emailError);
+      // Don't abort transaction - approval succeeded even if email failed
+      console.warn('Continuing despite email failure');
     }
 
+    // Commit transaction
     await session.commitTransaction();
     session.endSession();
-    res.json({
+    
+    console.log('=== Approval Request Completed Successfully ===');
+    
+    res.status(200).json({
+      success: true,
       message: 'تم الموافقة على الطلب وإرسال بريد إلكتروني بالتفاصيل',
       email: user.email,
     });
+    
   } catch (error) {
-    console.error('خطأ في الموافقة على طلب الانضمام:', error.message);
+    console.error('=== Approval Request Failed ===');
+    console.error('Error:', error);
+    
     await session.abortTransaction();
     session.endSession();
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    
+    // Determine error type
+    let statusCode = 500;
+    let errorMessage = 'خطأ في الخادم';
+    let errorCode = 'SERVER_ERROR';
+    
+    if (error.name === 'ValidationError') {
+      statusCode = 400;
+      errorMessage = 'بيانات غير صالحة';
+      errorCode = 'VALIDATION_ERROR';
+    } else if (error.name === 'MongoError' || error.name === 'MongoServerError') {
+      errorMessage = 'خطأ في قاعدة البيانات';
+      errorCode = 'DATABASE_ERROR';
+    }
+    
+    res.status(statusCode).json({ 
+      success: false,
+      message: errorMessage,
+      error: errorCode,
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
