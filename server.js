@@ -47,6 +47,7 @@ const allowedOrigins = [
 // Put this VERY EARLY – right after const app = express();
 app.use(cors({
   origin: [
+    'https://www.qatrah-ghaith.com',
     'http://localhost:4200',
     'http://127.0.0.1:4200',      // sometimes browsers use 127.0.0.1
     'http://localhost:4201',      // in case you changed port
