@@ -185,7 +185,6 @@ router.get('/join-requests', authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
-// Fixed approval endpoint with better error handling and logging
 router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -196,8 +195,6 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.log('Request ID:', req.params.id);
     console.log('User ID:', req.userId);
     console.log('User Role:', req.userRole);
-    console.log('Request Headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Request Body:', JSON.stringify(req.body, null, 2));
     console.log('═══════════════════════════════════════');
     
     // Validate environment variables
@@ -344,7 +341,7 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       console.warn('⚠️ Continuing despite email failure');
     }
 
-    // Commit transaction
+    // Commit transaction BEFORE sending response
     await session.commitTransaction();
     session.endSession();
     
@@ -352,7 +349,8 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.log('✅ Approval Request Completed Successfully');
     console.log('═══════════════════════════════════════\n');
     
-    res.status(200).json({
+    // Send response
+    return res.status(200).json({
       success: true,
       message: emailSent 
         ? 'تم الموافقة على الطلب وإرسال بريد إلكتروني بالتفاصيل'
@@ -375,7 +373,10 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.error('Error stack:', error.stack);
     console.error('═══════════════════════════════════════\n');
     
-    await session.abortTransaction();
+    // Abort transaction if still active
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     session.endSession();
     
     // Determine error type
@@ -396,7 +397,7 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       errorCode = 'DUPLICATE_EMAIL';
     }
     
-    res.status(statusCode).json({ 
+    return res.status(statusCode).json({ 
       success: false,
       message: errorMessage,
       error: errorCode,
