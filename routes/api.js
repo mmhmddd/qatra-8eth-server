@@ -185,7 +185,12 @@ router.get('/join-requests', authMiddleware, adminMiddleware, async (req, res) =
   }
 });
 
+// Production-ready approval endpoint optimized for Render.com
 router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async (req, res) => {
+  // Set longer timeout for Render.com cold starts
+  req.setTimeout(120000); // 2 minutes
+  res.setTimeout(120000);
+  
   const session = await mongoose.startSession();
   session.startTransaction();
   
@@ -194,7 +199,8 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.log('🔵 Approval Request Started');
     console.log('Request ID:', req.params.id);
     console.log('User ID:', req.userId);
-    console.log('User Role:', req.userRole);
+    console.log('Environment:', process.env.NODE_ENV || 'development');
+    console.log('Time:', new Date().toISOString());
     console.log('═══════════════════════════════════════');
     
     // Validate environment variables
@@ -204,7 +210,7 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       session.endSession();
       return res.status(500).json({ 
         success: false,
-        message: 'خطأ في إعدادات البريد الإلكتروني، تحقق من متغيرات البيئة',
+        message: 'خطأ في إعدادات البريد الإلكتروني',
         error: 'SMTP_CONFIG_MISSING'
       });
     }
@@ -221,8 +227,26 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       });
     }
 
-    // Find join request
-    const joinRequest = await JoinRequest.findById(req.params.id).session(session);
+    // Verify MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('❌ MongoDB not connected:', mongoose.connection.readyState);
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(503).json({
+        success: false,
+        message: 'قاعدة البيانات غير متاحة حاليًا',
+        error: 'DATABASE_UNAVAILABLE'
+      });
+    }
+
+    // Find join request with timeout
+    const joinRequest = await Promise.race([
+      JoinRequest.findById(req.params.id).session(session),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Database query timeout')), 30000)
+      )
+    ]);
+
     if (!joinRequest) {
       console.error('❌ Join request not found:', req.params.id);
       await session.abortTransaction();
@@ -306,63 +330,73 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       await user.save({ session });
     }
 
-    // Send email with error handling
-    let emailSent = false;
-    try {
-      const loginUrl = `${process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com'}/login`;
-      
-      console.log('📧 Preparing email:', {
-        to: joinRequest.email,
-        name: joinRequest.name,
-        hasPassword: !!randomPassword,
-        isNewUser
-      });
-
-      const htmlContent = await getApprovalEmailTemplate({
-        name: joinRequest.name,
-        email: joinRequest.email,
-        password: randomPassword,
-        loginUrl
-      });
-
-      await sendEmail({
-        to: joinRequest.email,
-        subject: 'تم الموافقة على طلب الانضمام الخاص بك',
-        html: htmlContent,
-        text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword || 'استخدم كلمة المرور الحالية'}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
-      });
-      
-      emailSent = true;
-      console.log('✅ Email sent successfully to:', joinRequest.email);
-    } catch (emailError) {
-      console.error('❌ Email sending failed:', emailError.message);
-      console.error('Email error stack:', emailError.stack);
-      // Continue - approval succeeded even if email failed
-      console.warn('⚠️ Continuing despite email failure');
-    }
-
-    // Commit transaction BEFORE sending response
+    // Commit transaction BEFORE email sending
     await session.commitTransaction();
     session.endSession();
-    
+    console.log('✅ Transaction committed successfully');
+
+    // Send email asynchronously (don't block response)
+    let emailSent = false;
+    const emailPromise = (async () => {
+      try {
+        const loginUrl = `${process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com'}/login`;
+        
+        console.log('📧 Preparing email:', {
+          to: joinRequest.email,
+          name: joinRequest.name,
+          hasPassword: !!randomPassword,
+          isNewUser
+        });
+
+        const htmlContent = await getApprovalEmailTemplate({
+          name: joinRequest.name,
+          email: joinRequest.email,
+          password: randomPassword,
+          loginUrl
+        });
+
+        await sendEmail({
+          to: joinRequest.email,
+          subject: 'تم الموافقة على طلب الانضمام الخاص بك',
+          html: htmlContent,
+          text: `مرحبًا ${joinRequest.name},\n\nتم الموافقة على طلب انضمامك!\nبريدك الإلكتروني: ${joinRequest.email}\nكلمة المرور: ${randomPassword || 'استخدم كلمة المرور الحالية'}\n\nيرجى تسجيل الدخول وتغيير كلمة المرور لاحقًا.\n\nتحياتنا,\nفريق الإدارة`,
+        });
+        
+        emailSent = true;
+        console.log('✅ Email sent successfully to:', joinRequest.email);
+        return true;
+      } catch (emailError) {
+        console.error('❌ Email sending failed:', emailError.message);
+        return false;
+      }
+    })();
+
+    // Don't wait for email, respond immediately
     console.log('═══════════════════════════════════════');
     console.log('✅ Approval Request Completed Successfully');
     console.log('═══════════════════════════════════════\n');
     
-    // Send response
-    return res.status(200).json({
+    // Send immediate response
+    const response = {
       success: true,
-      message: emailSent 
-        ? 'تم الموافقة على الطلب وإرسال بريد إلكتروني بالتفاصيل'
-        : 'تم الموافقة على الطلب ولكن فشل إرسال البريد الإلكتروني',
+      message: 'تم الموافقة على الطلب بنجاح',
       email: user.email,
       isNewUser,
-      emailSent,
+      emailSent: false, // Will be updated async
       data: {
         userId: user._id,
         email: user.email,
         name: joinRequest.name
       }
+    };
+
+    res.status(200).json(response);
+
+    // Log email result after response sent
+    emailPromise.then(result => {
+      console.log('📧 Email send result:', result ? 'success' : 'failed');
+    }).catch(err => {
+      console.error('📧 Email promise error:', err);
     });
     
   } catch (error) {
@@ -374,17 +408,25 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.error('═══════════════════════════════════════\n');
     
     // Abort transaction if still active
-    if (session.inTransaction()) {
-      await session.abortTransaction();
+    try {
+      if (session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      session.endSession();
+    } catch (sessionError) {
+      console.error('Error cleaning up session:', sessionError.message);
     }
-    session.endSession();
     
     // Determine error type
     let statusCode = 500;
     let errorMessage = 'خطأ في الخادم';
     let errorCode = 'SERVER_ERROR';
     
-    if (error.name === 'ValidationError') {
+    if (error.message === 'Database query timeout') {
+      statusCode = 504;
+      errorMessage = 'انتهت مهلة الاتصال بقاعدة البيانات';
+      errorCode = 'DATABASE_TIMEOUT';
+    } else if (error.name === 'ValidationError') {
       statusCode = 400;
       errorMessage = 'بيانات غير صالحة';
       errorCode = 'VALIDATION_ERROR';
