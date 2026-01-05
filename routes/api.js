@@ -1265,67 +1265,222 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
 });
 
 router.post('/forgot-password', async (req, res) => {
-  console.log('تم استلام طلب POST إلى /api/forgot-password مع البيانات:', req.body);
+  // Set timeout for production
+  req.setTimeout(60000); // 1 minute
+  res.setTimeout(60000);
+  
   try {
+    console.log('═══════════════════════════════════════');
+    console.log('🔵 Forgot Password Request Started');
+    console.log('Time:', new Date().toISOString());
+    console.log('Environment:', process.env.NODE_ENV || 'development');
+    console.log('Request Body:', { email: req.body.email ? '***@***' : 'missing' });
+    console.log('═══════════════════════════════════════');
+
     const { email } = req.body;
+
+    // Validation
     if (!email) {
-      console.log('خطأ: البريد الإلكتروني غير موجود في الطلب');
-      return res.status(400).json({ message: 'البريد الإلكتروني مطلوب' });
+      console.log('❌ Email missing in request');
+      return res.status(400).json({ 
+        success: false,
+        message: 'البريد الإلكتروني مطلوب' 
+      });
     }
+
     if (!validator.isEmail(email)) {
-      console.log('خطأ: البريد الإلكتروني غير صالح:', email);
-      return res.status(400).json({ message: 'البريد الإلكتروني غير صالح' });
+      console.log('❌ Invalid email format:', email);
+      return res.status(400).json({ 
+        success: false,
+        message: 'البريد الإلكتروني غير صالح' 
+      });
     }
 
+    // Verify SMTP configuration
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('❌ SMTP credentials missing in environment');
+      return res.status(500).json({ 
+        success: false,
+        message: 'خطأ في إعدادات البريد الإلكتروني',
+        error: 'SMTP_CONFIG_MISSING'
+      });
+    }
+
+    console.log('✅ SMTP credentials present');
+    console.log('SMTP User:', process.env.SMTP_USER);
+    console.log('SMTP Host:', process.env.SMTP_HOST || 'smtp.gmail.com');
+    console.log('SMTP Port:', process.env.SMTP_PORT || '587');
+
+    // Normalize email
     const normalizedEmail = email.toLowerCase().trim();
-    console.log('البريد الإلكتروني المطبع:', normalizedEmail);
+    console.log('🔍 Looking for user:', normalizedEmail);
+
+    // Find user
     const user = await User.findOne({ email: normalizedEmail });
+    
     if (!user) {
-      console.log('خطأ: لا يوجد مستخدم بهذا البريد:', normalizedEmail);
-      return res.status(404).json({ message: 'المستخدم غير موجود' });
+      console.log('❌ User not found:', normalizedEmail);
+      // Security: Don't reveal if user exists
+      return res.status(200).json({ 
+        success: true,
+        message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رابط إعادة التعيين'
+      });
     }
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenExpire = Date.now() + 3600000; // الرمز صالح لمدة ساعة واحدة
-    console.log('تم إنشاء رمز إعادة التعيين:', resetToken);
+    console.log('✅ User found:', { 
+      id: user._id, 
+      email: user.email,
+      hasResetToken: !!user.resetToken
+    });
 
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpire = Date.now() + 3600000; // 1 hour validity
+    
+    console.log('🔐 Generated reset token (first 10 chars):', resetToken.substring(0, 10));
+    console.log('⏰ Token expires at:', new Date(tokenExpire).toISOString());
+
+    // Save token to database
     user.resetToken = resetToken;
     user.tokenExpire = tokenExpire;
     await user.save();
-    console.log('تم حفظ رمز إعادة التعيين للمستخدم:', normalizedEmail);
+    
+    console.log('✅ Reset token saved to database');
 
-    const resetUrl = `${'https://www.qatrah-ghaith.com' || 'http://localhost:4200'}/reset-password/${resetToken}`;
-    console.log('رابط إعادة التعيين:', resetUrl);
+    // Determine frontend URL
+    const frontendUrl = process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com';
+    const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
+    
+    console.log('🔗 Reset URL:', resetUrl);
+    console.log('🌐 Frontend URL from env:', process.env.FRONTEND_URL);
 
+    // Generate email HTML from template
+    let htmlContent;
     try {
-      console.log('جارٍ استدعاء getResetEmailTemplate مع البيانات:', { name: user.name || 'المستخدم', resetUrl });
-      const htmlContent = await getResetEmailTemplate({
+      console.log('📧 Loading email template...');
+      htmlContent = await getResetEmailTemplate({
         name: user.name || 'المستخدم',
         resetUrl
       });
-      console.log('تم إنشاء htmlContent:', htmlContent.slice(0, 100));
+      
       if (!htmlContent) {
-        throw new Error('فشل في إنشاء محتوى HTML للبريد الإلكتروني');
+        throw new Error('Email template returned empty content');
       }
+      
+      console.log('✅ Email template generated successfully');
+      console.log('HTML Content length:', htmlContent.length);
+    } catch (templateError) {
+      console.error('❌ Template generation error:', templateError.message);
+      console.error('Stack:', templateError.stack);
+      
+      // Fallback to plain text
+      htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: rtl;">
+          <h2>إعادة تعيين كلمة المرور</h2>
+          <p>مرحبًا ${user.name || 'المستخدم'},</p>
+          <p>لقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.</p>
+          <p>يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:</p>
+          <a href="${resetUrl}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">
+            إعادة تعيين كلمة المرور
+          </a>
+          <p>أو انسخ والصق الرابط التالي في متصفحك:</p>
+          <p style="word-break: break-all; color: #666;">${resetUrl}</p>
+          <p>إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.</p>
+          <p><strong>الرابط صالح لمدة ساعة واحدة.</strong></p>
+          <p>تحياتنا،<br>فريق قطرة غيث</p>
+        </div>
+      `;
+      console.log('⚠️  Using fallback HTML template');
+    }
 
+    // Send email with detailed error handling
+    console.log('📧 Attempting to send email...');
+    console.log('To:', normalizedEmail);
+    console.log('Subject: إعادة تعيين كلمة المرور');
+    
+    try {
       await sendEmail({
         to: normalizedEmail,
-        subject: 'إعادة تعيين كلمة المرور',
-        html: htmlContent
+        subject: 'إعادة تعيين كلمة المرور - قطرة غيث',
+        html: htmlContent,
+        text: `مرحبًا،\n\nلقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.\nيرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:\n\n${resetUrl}\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.\n\nالرابط صالح لمدة ساعة واحدة.\n\nتحياتنا,\nفريق قطرة غيث`
       });
-
-      console.log('تم إرسال بريد إلكتروني لإعادة تعيين كلمة المرور إلى:', normalizedEmail);
-      res.json({ message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني' });
+      
+      console.log('✅ Email sent successfully to:', normalizedEmail);
+      console.log('═══════════════════════════════════════');
+      console.log('✅ Forgot Password Request Completed');
+      console.log('═══════════════════════════════════════\n');
+      
+      return res.status(200).json({ 
+        success: true,
+        message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني'
+      });
+      
     } catch (emailError) {
-      console.error('فشل إرسال بريد إعادة التعيين:', emailError.message, emailError.stack);
-      user.resetToken = null;
-      user.tokenExpire = null;
-      await user.save();
-      return res.status(500).json({ message: 'فشل في إرسال البريد الإلكتروني، حاول مرة أخرى لاحقًا', error: emailError.message });
+      console.error('═══════════════════════════════════════');
+      console.error('❌ Email Sending Failed');
+      console.error('Error name:', emailError.name);
+      console.error('Error message:', emailError.message);
+      console.error('Error code:', emailError.code);
+      console.error('Error response:', emailError.response);
+      console.error('Error responseCode:', emailError.responseCode);
+      console.error('Error stack:', emailError.stack);
+      console.error('═══════════════════════════════════════\n');
+      
+      // Rollback: Remove token from database
+      try {
+        user.resetToken = null;
+        user.tokenExpire = null;
+        await user.save();
+        console.log('🔄 Token removed from database after email failure');
+      } catch (rollbackError) {
+        console.error('❌ Failed to rollback token:', rollbackError.message);
+      }
+      
+      // Provide specific error messages
+      let errorMessage = 'فشل في إرسال البريد الإلكتروني، حاول مرة أخرى لاحقًا';
+      let errorCode = 'EMAIL_SEND_FAILED';
+      
+      if (emailError.code === 'EAUTH') {
+        errorMessage = 'خطأ في مصادقة البريد الإلكتروني';
+        errorCode = 'EMAIL_AUTH_FAILED';
+      } else if (emailError.code === 'ECONNECTION') {
+        errorMessage = 'فشل الاتصال بخادم البريد الإلكتروني';
+        errorCode = 'EMAIL_CONNECTION_FAILED';
+      } else if (emailError.code === 'ETIMEDOUT') {
+        errorMessage = 'انتهت مهلة إرسال البريد الإلكتروني';
+        errorCode = 'EMAIL_TIMEOUT';
+      }
+      
+      return res.status(500).json({ 
+        success: false,
+        message: errorMessage,
+        error: errorCode,
+        details: process.env.NODE_ENV === 'development' ? {
+          message: emailError.message,
+          code: emailError.code,
+          responseCode: emailError.responseCode
+        } : undefined
+      });
     }
+    
   } catch (error) {
-    console.error('خطأ في طلب إعادة تعيين كلمة المرور:', error.message, error.stack);
-    res.status(500).json({ message: 'خطأ في الخادم', error: error.message });
+    console.error('═══════════════════════════════════════');
+    console.error('❌ Forgot Password Request Failed');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('═══════════════════════════════════════\n');
+    
+    return res.status(500).json({ 
+      success: false,
+      message: 'خطأ في الخادم',
+      error: 'SERVER_ERROR',
+      details: process.env.NODE_ENV === 'development' ? {
+        message: error.message,
+        stack: error.stack
+      } : undefined
+    });
   }
 });
 
