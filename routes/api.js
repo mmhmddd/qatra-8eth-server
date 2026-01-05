@@ -1274,7 +1274,6 @@ router.post('/forgot-password', async (req, res) => {
     console.log('🔵 Forgot Password Request Started');
     console.log('Time:', new Date().toISOString());
     console.log('Environment:', process.env.NODE_ENV || 'development');
-    console.log('Request Body:', { email: req.body.email ? '***@***' : 'missing' });
     console.log('═══════════════════════════════════════');
 
     const { email } = req.body;
@@ -1298,7 +1297,7 @@ router.post('/forgot-password', async (req, res) => {
 
     // Verify SMTP configuration
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ SMTP credentials missing in environment');
+      console.error('❌ SMTP credentials missing');
       return res.status(500).json({ 
         success: false,
         message: 'خطأ في إعدادات البريد الإلكتروني',
@@ -1307,20 +1306,22 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     console.log('✅ SMTP credentials present');
-    console.log('SMTP User:', process.env.SMTP_USER);
-    console.log('SMTP Host:', process.env.SMTP_HOST || 'smtp.gmail.com');
-    console.log('SMTP Port:', process.env.SMTP_PORT || '587');
 
     // Normalize email
     const normalizedEmail = email.toLowerCase().trim();
     console.log('🔍 Looking for user:', normalizedEmail);
 
-    // Find user
-    const user = await User.findOne({ email: normalizedEmail });
+    // Find user with timeout protection
+    const user = await Promise.race([
+      User.findOne({ email: normalizedEmail }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Database query timeout')), 10000)
+      )
+    ]);
     
     if (!user) {
       console.log('❌ User not found:', normalizedEmail);
-      // Security: Don't reveal if user exists
+      // SECURITY: Don't reveal if user exists - respond success anyway
       return res.status(200).json({ 
         success: true,
         message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رابط إعادة التعيين'
@@ -1329,21 +1330,26 @@ router.post('/forgot-password', async (req, res) => {
 
     console.log('✅ User found:', { 
       id: user._id, 
-      email: user.email,
-      hasResetToken: !!user.resetToken
+      email: user.email
     });
 
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const tokenExpire = Date.now() + 3600000; // 1 hour validity
     
-    console.log('🔐 Generated reset token (first 10 chars):', resetToken.substring(0, 10));
+    console.log('🔐 Generated reset token');
     console.log('⏰ Token expires at:', new Date(tokenExpire).toISOString());
 
-    // Save token to database
+    // Save token to database with timeout
     user.resetToken = resetToken;
     user.tokenExpire = tokenExpire;
-    await user.save();
+    
+    await Promise.race([
+      user.save(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Database save timeout')), 10000)
+      )
+    ]);
     
     console.log('✅ Reset token saved to database');
 
@@ -1351,131 +1357,114 @@ router.post('/forgot-password', async (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com';
     const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
     
-    console.log('🔗 Reset URL:', resetUrl);
-    console.log('🌐 Frontend URL from env:', process.env.FRONTEND_URL);
+    console.log('🔗 Reset URL generated');
 
-    // Generate email HTML from template
-    let htmlContent;
-    try {
-      console.log('📧 Loading email template...');
-      htmlContent = await getResetEmailTemplate({
-        name: user.name || 'المستخدم',
-        resetUrl
-      });
-      
-      if (!htmlContent) {
-        throw new Error('Email template returned empty content');
-      }
-      
-      console.log('✅ Email template generated successfully');
-      console.log('HTML Content length:', htmlContent.length);
-    } catch (templateError) {
-      console.error('❌ Template generation error:', templateError.message);
-      console.error('Stack:', templateError.stack);
-      
-      // Fallback to plain text
-      htmlContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: rtl;">
-          <h2>إعادة تعيين كلمة المرور</h2>
-          <p>مرحبًا ${user.name || 'المستخدم'},</p>
-          <p>لقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.</p>
-          <p>يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:</p>
-          <a href="${resetUrl}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">
-            إعادة تعيين كلمة المرور
-          </a>
-          <p>أو انسخ والصق الرابط التالي في متصفحك:</p>
-          <p style="word-break: break-all; color: #666;">${resetUrl}</p>
-          <p>إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.</p>
-          <p><strong>الرابط صالح لمدة ساعة واحدة.</strong></p>
-          <p>تحياتنا،<br>فريق قطرة غيث</p>
-        </div>
-      `;
-      console.log('⚠️  Using fallback HTML template');
-    }
-
-    // Send email with detailed error handling
-    console.log('📧 Attempting to send email...');
-    console.log('To:', normalizedEmail);
-    console.log('Subject: إعادة تعيين كلمة المرور');
+    // ═══════════════════════════════════════════════════════════
+    // CRITICAL FIX: Respond immediately, send email asynchronously
+    // ═══════════════════════════════════════════════════════════
     
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: 'إعادة تعيين كلمة المرور - قطرة غيث',
-        html: htmlContent,
-        text: `مرحبًا،\n\nلقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.\nيرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:\n\n${resetUrl}\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.\n\nالرابط صالح لمدة ساعة واحدة.\n\nتحياتنا,\nفريق قطرة غيث`
-      });
-      
-      console.log('✅ Email sent successfully to:', normalizedEmail);
-      console.log('═══════════════════════════════════════');
-      console.log('✅ Forgot Password Request Completed');
-      console.log('═══════════════════════════════════════\n');
-      
-      return res.status(200).json({ 
-        success: true,
-        message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني'
-      });
-      
-    } catch (emailError) {
-      console.error('═══════════════════════════════════════');
-      console.error('❌ Email Sending Failed');
-      console.error('Error name:', emailError.name);
-      console.error('Error message:', emailError.message);
-      console.error('Error code:', emailError.code);
-      console.error('Error response:', emailError.response);
-      console.error('Error responseCode:', emailError.responseCode);
-      console.error('Error stack:', emailError.stack);
-      console.error('═══════════════════════════════════════\n');
-      
-      // Rollback: Remove token from database
+    console.log('✅ Forgot Password Request Completed - Responding immediately');
+    console.log('═══════════════════════════════════════\n');
+    
+    // Send immediate response
+    res.status(200).json({ 
+      success: true,
+      message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني'
+    });
+
+    // Send email asynchronously (don't block response)
+    (async () => {
       try {
-        user.resetToken = null;
-        user.tokenExpire = null;
-        await user.save();
-        console.log('🔄 Token removed from database after email failure');
-      } catch (rollbackError) {
-        console.error('❌ Failed to rollback token:', rollbackError.message);
+        console.log('📧 Starting async email send...');
+        
+        // Generate email HTML from template
+        let htmlContent;
+        try {
+          htmlContent = await getResetEmailTemplate({
+            name: user.name || 'المستخدم',
+            resetUrl
+          });
+          console.log('✅ Email template generated');
+        } catch (templateError) {
+          console.error('⚠️  Template error, using fallback:', templateError.message);
+          
+          // Fallback HTML
+          htmlContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: rtl;">
+              <h2>إعادة تعيين كلمة المرور</h2>
+              <p>مرحبًا ${user.name || 'المستخدم'},</p>
+              <p>لقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.</p>
+              <p>يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:</p>
+              <a href="${resetUrl}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">
+                إعادة تعيين كلمة المرور
+              </a>
+              <p>أو انسخ والصق الرابط التالي في متصفحك:</p>
+              <p style="word-break: break-all; color: #666;">${resetUrl}</p>
+              <p>إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.</p>
+              <p><strong>الرابط صالح لمدة ساعة واحدة.</strong></p>
+              <p>تحياتنا،<br>فريق قطرة غيث</p>
+            </div>
+          `;
+        }
+
+        // Send email with timeout protection
+        await Promise.race([
+          sendEmail({
+            to: normalizedEmail,
+            subject: 'إعادة تعيين كلمة المرور - قطرة غيث',
+            html: htmlContent,
+            text: `مرحبًا،\n\nلقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.\nيرجى النقر على الرابط التالي:\n\n${resetUrl}\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد.\n\nالرابط صالح لمدة ساعة واحدة.\n\nتحياتنا,\nفريق قطرة غيث`
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Email send timeout')), 30000)
+          )
+        ]);
+        
+        console.log('✅ Email sent successfully to:', normalizedEmail);
+        
+      } catch (emailError) {
+        console.error('═══════════════════════════════════════');
+        console.error('❌ Async Email Sending Failed');
+        console.error('Error:', emailError.message);
+        console.error('═══════════════════════════════════════');
+        
+        // Rollback: Remove token from database
+        try {
+          user.resetToken = null;
+          user.tokenExpire = null;
+          await user.save();
+          console.log('🔄 Token removed after email failure');
+        } catch (rollbackError) {
+          console.error('❌ Rollback failed:', rollbackError.message);
+        }
       }
-      
-      // Provide specific error messages
-      let errorMessage = 'فشل في إرسال البريد الإلكتروني، حاول مرة أخرى لاحقًا';
-      let errorCode = 'EMAIL_SEND_FAILED';
-      
-      if (emailError.code === 'EAUTH') {
-        errorMessage = 'خطأ في مصادقة البريد الإلكتروني';
-        errorCode = 'EMAIL_AUTH_FAILED';
-      } else if (emailError.code === 'ECONNECTION') {
-        errorMessage = 'فشل الاتصال بخادم البريد الإلكتروني';
-        errorCode = 'EMAIL_CONNECTION_FAILED';
-      } else if (emailError.code === 'ETIMEDOUT') {
-        errorMessage = 'انتهت مهلة إرسال البريد الإلكتروني';
-        errorCode = 'EMAIL_TIMEOUT';
-      }
-      
-      return res.status(500).json({ 
-        success: false,
-        message: errorMessage,
-        error: errorCode,
-        details: process.env.NODE_ENV === 'development' ? {
-          message: emailError.message,
-          code: emailError.code,
-          responseCode: emailError.responseCode
-        } : undefined
-      });
-    }
+    })();
     
   } catch (error) {
     console.error('═══════════════════════════════════════');
     console.error('❌ Forgot Password Request Failed');
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('Error:', error.message);
     console.error('═══════════════════════════════════════\n');
     
-    return res.status(500).json({ 
+    // Determine error type
+    let statusCode = 500;
+    let errorMessage = 'خطأ في الخادم';
+    let errorCode = 'SERVER_ERROR';
+    
+    if (error.message === 'Database query timeout' || error.message === 'Database save timeout') {
+      statusCode = 504;
+      errorMessage = 'انتهت مهلة الاتصال بقاعدة البيانات';
+      errorCode = 'DATABASE_TIMEOUT';
+    } else if (error.name === 'ValidationError') {
+      statusCode = 400;
+      errorMessage = 'بيانات غير صالحة';
+      errorCode = 'VALIDATION_ERROR';
+    }
+    
+    return res.status(statusCode).json({ 
       success: false,
-      message: 'خطأ في الخادم',
-      error: 'SERVER_ERROR',
+      message: errorMessage,
+      error: errorCode,
       details: process.env.NODE_ENV === 'development' ? {
         message: error.message,
         stack: error.stack
