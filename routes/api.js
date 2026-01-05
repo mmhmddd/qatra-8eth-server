@@ -1265,8 +1265,7 @@ router.delete('/profile/meetings/:meetingId', authMiddleware, async (req, res) =
 });
 
 router.post('/forgot-password', async (req, res) => {
-  // Set timeout for production
-  req.setTimeout(60000); // 1 minute
+  req.setTimeout(60000);
   res.setTimeout(60000);
   
   try {
@@ -1280,7 +1279,7 @@ router.post('/forgot-password', async (req, res) => {
 
     // Validation
     if (!email) {
-      console.log('❌ Email missing in request');
+      console.log('❌ Email missing');
       return res.status(400).json({ 
         success: false,
         message: 'البريد الإلكتروني مطلوب' 
@@ -1288,7 +1287,7 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     if (!validator.isEmail(email)) {
-      console.log('❌ Invalid email format:', email);
+      console.log('❌ Invalid email format');
       return res.status(400).json({ 
         success: false,
         message: 'البريد الإلكتروني غير صالح' 
@@ -1307,11 +1306,10 @@ router.post('/forgot-password', async (req, res) => {
 
     console.log('✅ SMTP credentials present');
 
-    // Normalize email
+    // Find user
     const normalizedEmail = email.toLowerCase().trim();
     console.log('🔍 Looking for user:', normalizedEmail);
 
-    // Find user with timeout protection
     const user = await Promise.race([
       User.findOne({ email: normalizedEmail }),
       new Promise((_, reject) => 
@@ -1320,27 +1318,22 @@ router.post('/forgot-password', async (req, res) => {
     ]);
     
     if (!user) {
-      console.log('❌ User not found:', normalizedEmail);
-      // SECURITY: Don't reveal if user exists - respond success anyway
+      console.log('❌ User not found');
       return res.status(200).json({ 
         success: true,
         message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رابط إعادة التعيين'
       });
     }
 
-    console.log('✅ User found:', { 
-      id: user._id, 
-      email: user.email
-    });
+    console.log('✅ User found:', user._id);
 
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenExpire = Date.now() + 3600000; // 1 hour validity
+    const tokenExpire = Date.now() + 3600000;
     
     console.log('🔐 Generated reset token');
-    console.log('⏰ Token expires at:', new Date(tokenExpire).toISOString());
 
-    // Save token to database with timeout
+    // Save token
     user.resetToken = resetToken;
     user.tokenExpire = tokenExpire;
     
@@ -1351,124 +1344,128 @@ router.post('/forgot-password', async (req, res) => {
       )
     ]);
     
-    console.log('✅ Reset token saved to database');
+    console.log('✅ Token saved to database');
 
-    // Determine frontend URL
+    // Generate reset URL
     const frontendUrl = process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com';
     const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
     
-    console.log('🔗 Reset URL generated');
-
-    // ═══════════════════════════════════════════════════════════
-    // CRITICAL FIX: Respond immediately, send email asynchronously
-    // ═══════════════════════════════════════════════════════════
+    console.log('🔗 Reset URL:', resetUrl);
+    console.log('✅ Responding immediately to user');
     
-    console.log('✅ Forgot Password Request Completed - Responding immediately');
-    console.log('═══════════════════════════════════════\n');
-    
-    // Send immediate response
+    // Respond immediately
     res.status(200).json({ 
       success: true,
       message: 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني'
     });
 
-    // Send email asynchronously (don't block response)
+    // Send email asynchronously with COMPREHENSIVE error logging
     (async () => {
       try {
-        console.log('📧 Starting async email send...');
+        console.log('\n🔵 ASYNC EMAIL SEND STARTED');
+        console.log('═══════════════════════════════════════');
         
-        // Generate email HTML from template
+        // Generate email HTML
         let htmlContent;
         try {
           htmlContent = await getResetEmailTemplate({
             name: user.name || 'المستخدم',
             resetUrl
           });
-          console.log('✅ Email template generated');
+          console.log('✅ Email template generated successfully');
+          console.log('HTML length:', htmlContent?.length || 0);
         } catch (templateError) {
-          console.error('⚠️  Template error, using fallback:', templateError.message);
+          console.error('⚠️  Template generation failed:', templateError.message);
           
           // Fallback HTML
           htmlContent = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: rtl;">
-              <h2>إعادة تعيين كلمة المرور</h2>
-              <p>مرحبًا ${user.name || 'المستخدم'},</p>
-              <p>لقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.</p>
-              <p>يرجى النقر على الرابط التالي لإعادة تعيين كلمة المرور:</p>
-              <a href="${resetUrl}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">
-                إعادة تعيين كلمة المرور
-              </a>
-              <p>أو انسخ والصق الرابط التالي في متصفحك:</p>
-              <p style="word-break: break-all; color: #666;">${resetUrl}</p>
-              <p>إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد الإلكتروني.</p>
-              <p><strong>الرابط صالح لمدة ساعة واحدة.</strong></p>
-              <p>تحياتنا،<br>فريق قطرة غيث</p>
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; direction: rtl; background: #f9f9f9; border-radius: 10px;">
+              <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h2 style="color: #333; text-align: center;">إعادة تعيين كلمة المرور</h2>
+                <p style="color: #666; line-height: 1.6;">مرحبًا ${user.name || 'المستخدم'},</p>
+                <p style="color: #666; line-height: 1.6;">لقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.</p>
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${resetUrl}" style="background: #007bff; color: white; padding: 14px 28px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                    إعادة تعيين كلمة المرور
+                  </a>
+                </div>
+                <p style="color: #999; font-size: 12px; line-height: 1.6;">أو انسخ والصق الرابط التالي في متصفحك:</p>
+                <p style="word-break: break-all; color: #007bff; font-size: 12px;">${resetUrl}</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="color: #999; font-size: 12px;">إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد.</p>
+                <p style="color: #999; font-size: 12px;"><strong>الرابط صالح لمدة ساعة واحدة.</strong></p>
+                <p style="color: #666; margin-top: 20px;">تحياتنا،<br><strong>فريق قطرة غيث</strong></p>
+              </div>
             </div>
           `;
+          console.log('✅ Using fallback HTML template');
         }
 
-        // Send email with timeout protection
-        await Promise.race([
+        // Send email with full error capture
+        console.log('📤 Calling sendEmail function...');
+        
+        const emailResult = await Promise.race([
           sendEmail({
             to: normalizedEmail,
             subject: 'إعادة تعيين كلمة المرور - قطرة غيث',
             html: htmlContent,
-            text: `مرحبًا،\n\nلقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.\nيرجى النقر على الرابط التالي:\n\n${resetUrl}\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد.\n\nالرابط صالح لمدة ساعة واحدة.\n\nتحياتنا,\nفريق قطرة غيث`
+            text: `مرحبًا،\n\nلقد تلقينا طلبًا لإعادة تعيين كلمة المرور لحسابك.\n\nيرجى النقر على الرابط التالي:\n\n${resetUrl}\n\nإذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد.\n\nالرابط صالح لمدة ساعة واحدة.\n\nتحياتنا,\nفريق قطرة غيث`
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Email send timeout')), 30000)
+            setTimeout(() => reject(new Error('Overall email timeout (45s)')), 45000)
           )
         ]);
         
-        console.log('✅ Email sent successfully to:', normalizedEmail);
+        console.log('═══════════════════════════════════════');
+        console.log('✅ ASYNC EMAIL COMPLETED SUCCESSFULLY');
+        console.log('Email result:', emailResult);
+        console.log('═══════════════════════════════════════\n');
         
-      } catch (emailError) {
-        console.error('═══════════════════════════════════════');
-        console.error('❌ Async Email Sending Failed');
-        console.error('Error:', emailError.message);
-        console.error('═══════════════════════════════════════');
+      } catch (asyncEmailError) {
+        console.error('\n═══════════════════════════════════════');
+        console.error('❌ ASYNC EMAIL SEND FAILED');
+        console.error('Error name:', asyncEmailError.name);
+        console.error('Error message:', asyncEmailError.message);
+        console.error('Error code:', asyncEmailError.code);
+        console.error('Error response:', asyncEmailError.response);
+        console.error('Error stack:', asyncEmailError.stack);
+        console.error('Full error:', JSON.stringify(asyncEmailError, Object.getOwnPropertyNames(asyncEmailError), 2));
+        console.error('═══════════════════════════════════════\n');
         
-        // Rollback: Remove token from database
+        // Rollback token
         try {
+          console.log('🔄 Rolling back token...');
           user.resetToken = null;
           user.tokenExpire = null;
           await user.save();
-          console.log('🔄 Token removed after email failure');
+          console.log('✅ Token removed after email failure');
         } catch (rollbackError) {
           console.error('❌ Rollback failed:', rollbackError.message);
         }
       }
-    })();
+    })(); // End async IIFE
     
   } catch (error) {
     console.error('═══════════════════════════════════════');
     console.error('❌ Forgot Password Request Failed');
     console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
     console.error('═══════════════════════════════════════\n');
     
-    // Determine error type
     let statusCode = 500;
     let errorMessage = 'خطأ في الخادم';
     let errorCode = 'SERVER_ERROR';
     
-    if (error.message === 'Database query timeout' || error.message === 'Database save timeout') {
+    if (error.message?.includes('timeout')) {
       statusCode = 504;
-      errorMessage = 'انتهت مهلة الاتصال بقاعدة البيانات';
-      errorCode = 'DATABASE_TIMEOUT';
-    } else if (error.name === 'ValidationError') {
-      statusCode = 400;
-      errorMessage = 'بيانات غير صالحة';
-      errorCode = 'VALIDATION_ERROR';
+      errorMessage = 'انتهت مهلة العملية';
+      errorCode = 'TIMEOUT';
     }
     
     return res.status(statusCode).json({ 
       success: false,
       message: errorMessage,
-      error: errorCode,
-      details: process.env.NODE_ENV === 'development' ? {
-        message: error.message,
-        stack: error.stack
-      } : undefined
+      error: errorCode
     });
   }
 });
