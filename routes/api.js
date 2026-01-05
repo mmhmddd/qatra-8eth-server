@@ -1294,7 +1294,7 @@ router.post('/forgot-password', async (req, res) => {
     await user.save();
     console.log('تم حفظ رمز إعادة التعيين للمستخدم:', normalizedEmail);
 
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password/${resetToken}`;
+    const resetUrl = `${'https://www.qatrah-ghaith.com' || 'http://localhost:4200'}/reset-password/${resetToken}`;
     console.log('رابط إعادة التعيين:', resetUrl);
 
     try {
