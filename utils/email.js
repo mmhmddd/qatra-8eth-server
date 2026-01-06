@@ -1,4 +1,4 @@
-// utils/email.js - PRODUCTION-READY VERSION WITH COMPREHENSIVE LOGGING
+// utils/email.js - محسّن لـ Zoho Mail على Render.com
 
 import nodemailer from 'nodemailer';
 
@@ -6,183 +6,176 @@ const sendEmail = async ({ to, subject, text, html }) => {
   const startTime = Date.now();
   
   console.log('\n═══════════════════════════════════════');
-  console.log('📧 EMAIL SEND ATTEMPT STARTED');
-  console.log('Time:', new Date().toISOString());
-  console.log('To:', to);
-  console.log('Subject:', subject);
-  console.log('Has HTML:', !!html);
-  console.log('Has Text:', !!text);
+  console.log('📧 بدء إرسال البريد الإلكتروني');
+  console.log('الوقت:', new Date().toISOString());
+  console.log('إلى:', to);
+  console.log('الموضوع:', subject);
   console.log('═══════════════════════════════════════');
 
   try {
-    // Step 1: Validate inputs
+    // التحقق من المدخلات
     if (!to || !subject || (!text && !html)) {
-      throw new Error('Missing required email parameters');
+      throw new Error('معلومات البريد الإلكتروني غير مكتملة');
     }
 
-    // Step 2: Validate environment variables
+    // التحقق من بيانات SMTP
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ Missing SMTP credentials in environment');
-      throw new Error('SMTP credentials not configured');
+      console.error('❌ بيانات SMTP غير موجودة');
+      throw new Error('إعدادات البريد الإلكتروني غير مكتملة');
     }
 
-    console.log('📋 SMTP Configuration:');
-    console.log('  Host:', process.env.SMTP_HOST || 'smtp.gmail.com');
-    console.log('  Port:', process.env.SMTP_PORT || 587);
-    console.log('  User:', process.env.SMTP_USER);
-    console.log('  Pass:', '***' + process.env.SMTP_PASS.slice(-4));
-    console.log('  Secure:', (process.env.SMTP_PORT || '587') === '465');
+    console.log('📋 إعدادات SMTP:');
+    console.log('  الخادم:', process.env.SMTP_HOST);
+    console.log('  المنفذ:', process.env.SMTP_PORT);
+    console.log('  المستخدم:', process.env.SMTP_USER);
+    console.log('  البيئة:', process.env.NODE_ENV || 'development');
 
-    // Step 3: Create transporter with detailed config
+    // إعدادات Zoho محسّنة لـ Render.com
     const transportConfig = {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      host: process.env.SMTP_HOST || 'smtp.zoho.com',
       port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: (process.env.SMTP_PORT || '587') === '465', // true for 465, false for 587
+      secure: false, // false للمنفذ 587
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
       },
-      // Critical timeouts
-      connectionTimeout: 30000, // 30 seconds
-      greetingTimeout: 20000,   // 20 seconds
-      socketTimeout: 45000,      // 45 seconds
-      // Enable detailed logging
-      debug: true,
-      logger: true,
-      // TLS configuration
+      // إعدادات حاسمة لـ Zoho على Render
+      requireTLS: true,
       tls: {
-        rejectUnauthorized: true,
+        ciphers: 'SSLv3',
+        rejectUnauthorized: true, // تغيير إلى true للأمان
         minVersion: 'TLSv1.2'
       },
-      // Disable connection pooling for reliability
-      pool: false,
-      maxConnections: 1,
-      maxMessages: 1
+      // Timeouts محسّنة لـ Render
+      connectionTimeout: 60000,
+      greetingTimeout: 30000, 
+      socketTimeout: 60000,
+      // Pool settings
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
+      // Debugging
+      debug: process.env.NODE_ENV !== 'production',
+      logger: process.env.NODE_ENV !== 'production'
     };
 
-    console.log('🔧 Creating transporter...');
+    console.log('🔧 إنشاء الاتصال مع Zoho...');
     const transporter = nodemailer.createTransport(transportConfig);
-    console.log('✅ Transporter created');
+    console.log('✅ تم إنشاء الاتصال');
 
-    // Step 4: Verify SMTP connection (CRITICAL)
-    console.log('🔍 Verifying SMTP connection...');
+    // التحقق من الاتصال (مع timeout)
+    console.log('🔍 التحقق من الاتصال بخادم Zoho...');
     const verifyStartTime = Date.now();
     
-    try {
-      const verifyResult = await Promise.race([
-        transporter.verify(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('SMTP verification timeout (20s)')), 20000)
-        )
-      ]);
-      
-      const verifyDuration = Date.now() - verifyStartTime;
-      console.log(`✅ SMTP verified in ${verifyDuration}ms:`, verifyResult);
-      
-    } catch (verifyError) {
-      const verifyDuration = Date.now() - verifyStartTime;
-      console.error(`❌ SMTP verification FAILED after ${verifyDuration}ms`);
-      console.error('Verify error name:', verifyError.name);
-      console.error('Verify error message:', verifyError.message);
-      console.error('Verify error code:', verifyError.code);
-      console.error('Verify error command:', verifyError.command);
-      console.error('Verify error response:', verifyError.response);
-      console.error('Verify error responseCode:', verifyError.responseCode);
-      
-      // Provide specific error messages
-      if (verifyError.code === 'EAUTH') {
-        throw new Error('Gmail authentication failed - check App Password');
-      } else if (verifyError.code === 'ETIMEDOUT' || verifyError.message.includes('timeout')) {
-        throw new Error('Gmail connection timeout - may be blocked by firewall');
-      } else if (verifyError.code === 'ECONNECTION' || verifyError.code === 'ECONNREFUSED') {
-        throw new Error('Cannot connect to Gmail SMTP server');
-      } else if (verifyError.code === 'ESOCKET') {
-        throw new Error('Socket connection error - network issue');
-      } else {
-        throw new Error(`SMTP verification failed: ${verifyError.message}`);
-      }
-    }
+    await Promise.race([
+      transporter.verify(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('VERIFY_TIMEOUT')), 30000)
+      )
+    ]);
+    
+    const verifyDuration = Date.now() - verifyStartTime;
+    console.log(`✅ تم التحقق من الاتصال في ${verifyDuration}ms`);
 
-    // Step 5: Prepare mail options
+    // إعداد البريد مع معلومات إضافية
     const mailOptions = {
-      from: `"قطرة غيث" <${process.env.SMTP_USER}>`,
+      from: {
+        name: 'قطرة غيث',
+        address: process.env.SMTP_USER
+      },
       to: to,
       subject: subject,
-      text: text,
+      text: text || 'هذا البريد يتطلب عميل بريد يدعم HTML',
       html: html,
-      // Add headers for better deliverability
+      // Headers إضافية لتحسين التسليم
       headers: {
-        'X-Mailer': 'Qatrah Ghaith System',
         'X-Priority': '3',
+        'X-Mailer': 'Qatrah Ghaith System',
         'Importance': 'normal'
+      },
+      // Envelope لضمان صحة المرسل
+      envelope: {
+        from: process.env.SMTP_USER,
+        to: to
       }
     };
 
-    console.log('📝 Mail options prepared:');
-    console.log('  From:', mailOptions.from);
-    console.log('  To:', mailOptions.to);
-    console.log('  Subject:', mailOptions.subject);
-    console.log('  HTML length:', html?.length || 0);
-    console.log('  Text length:', text?.length || 0);
+    console.log('📝 تم إعداد البريد');
+    console.log('  من:', mailOptions.from.address);
+    console.log('  إلى:', mailOptions.to);
 
-    // Step 6: Send email with timeout protection
-    console.log('📤 Sending email via SMTP...');
+    // إرسال البريد مع timeout
+    console.log('📤 جاري الإرسال...');
     const sendStartTime = Date.now();
     
     const info = await Promise.race([
       transporter.sendMail(mailOptions),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Email send timeout (30s)')), 30000)
+        setTimeout(() => reject(new Error('SEND_TIMEOUT')), 45000)
       )
     ]);
-
+    
     const sendDuration = Date.now() - sendStartTime;
     const totalDuration = Date.now() - startTime;
 
-    console.log('\n═══════════════════════════════════════');
-    console.log('✅ EMAIL SENT SUCCESSFULLY');
-    console.log('Send duration:', sendDuration + 'ms');
-    console.log('Total duration:', totalDuration + 'ms');
-    console.log('Message ID:', info.messageId);
-    console.log('Response:', info.response);
-    console.log('Accepted:', info.accepted);
-    console.log('Rejected:', info.rejected);
-    console.log('═══════════════════════════════════════\n');
-
-    // Check if email was rejected
-    if (info.rejected && info.rejected.length > 0) {
-      console.warn('⚠️  Email was rejected for:', info.rejected);
-      throw new Error(`Email rejected by server for: ${info.rejected.join(', ')}`);
+    // التحقق من نجاح الإرسال
+    if (!info.messageId) {
+      throw new Error('لم يتم استلام messageId من الخادم');
     }
 
-    return info;
+    if (info.rejected && info.rejected.length > 0) {
+      console.warn('⚠️  تم رفض البريد لـ:', info.rejected);
+      throw new Error(`تم رفض البريد: ${info.rejected.join(', ')}`);
+    }
+
+    console.log('\n═══════════════════════════════════════');
+    console.log('✅ تم إرسال البريد بنجاح');
+    console.log('مدة الإرسال:', sendDuration + 'ms');
+    console.log('المدة الإجمالية:', totalDuration + 'ms');
+    console.log('معرف الرسالة:', info.messageId);
+    console.log('الاستجابة:', info.response);
+    console.log('تم القبول:', info.accepted);
+    console.log('═══════════════════════════════════════\n');
+
+    // إغلاق الاتصال
+    transporter.close();
+
+    return {
+      success: true,
+      messageId: info.messageId,
+      response: info.response,
+      accepted: info.accepted
+    };
 
   } catch (error) {
     const totalDuration = Date.now() - startTime;
     
     console.error('\n═══════════════════════════════════════');
-    console.error('❌ EMAIL SEND FAILED');
-    console.error('Total duration:', totalDuration + 'ms');
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error code:', error.code);
-    console.error('Error command:', error.command);
-    console.error('Error response:', error.response);
-    console.error('Error responseCode:', error.responseCode);
-    console.error('Error syscall:', error.syscall);
-    console.error('Error errno:', error.errno);
-    console.error('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-    console.error('Stack trace:', error.stack);
+    console.error('❌ فشل إرسال البريد');
+    console.error('المدة الإجمالية:', totalDuration + 'ms');
+    console.error('اسم الخطأ:', error.name);
+    console.error('رسالة الخطأ:', error.message);
+    console.error('كود الخطأ:', error.code);
+    console.error('رمز الاستجابة:', error.responseCode);
+    console.error('استجابة الخادم:', error.response);
     console.error('═══════════════════════════════════════\n');
 
-    // Re-throw with more context
-    const enhancedError = new Error(`Email failed: ${error.message}`);
-    enhancedError.originalError = error;
-    enhancedError.code = error.code;
-    enhancedError.to = to;
-    enhancedError.duration = totalDuration;
+    // تفسير الأخطاء الشائعة
+    let userMessage = 'فشل في إرسال البريد الإلكتروني';
     
-    throw enhancedError;
+    if (error.code === 'EAUTH' || error.responseCode === 535) {
+      userMessage = 'خطأ في المصادقة: تحقق من اسم المستخدم وكلمة المرور';
+    } else if (error.code === 'ETIMEDOUT' || error.message === 'VERIFY_TIMEOUT' || error.message === 'SEND_TIMEOUT') {
+      userMessage = 'انتهت مهلة الاتصال بخادم البريد';
+    } else if (error.code === 'ECONNREFUSED') {
+      userMessage = 'تم رفض الاتصال: تحقق من إعدادات الخادم والمنفذ';
+    } else if (error.code === 'ESOCKET') {
+      userMessage = 'خطأ في الاتصال بالشبكة';
+    } else if (error.responseCode === 550) {
+      userMessage = 'عنوان البريد الإلكتروني غير صالح أو محظور';
+    }
+
+    throw new Error(userMessage + ': ' + error.message);
   }
 };
 
