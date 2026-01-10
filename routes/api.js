@@ -205,15 +205,17 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     
     // Validate environment variables
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      console.error('❌ Missing SMTP configuration');
+      console.error('❌ Missing Gmail configuration');
       await session.abortTransaction();
       session.endSession();
       return res.status(500).json({ 
         success: false,
         message: 'خطأ في إعدادات البريد الإلكتروني',
-        error: 'SMTP_CONFIG_MISSING'
+        error: 'GMAIL_CONFIG_MISSING'
       });
     }
+
+console.log('✅ Gmail credentials present');
 
     // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -1294,17 +1296,22 @@ router.post('/forgot-password', async (req, res) => {
       });
     }
 
-    // Verify SMTP configuration
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      console.error('❌ SMTP credentials missing');
+      console.error('❌ Gmail credentials missing');
       return res.status(500).json({ 
         success: false,
         message: 'خطأ في إعدادات البريد الإلكتروني',
-        error: 'SMTP_CONFIG_MISSING'
+        error: 'GMAIL_CONFIG_MISSING'
       });
     }
 
-    console.log('✅ SMTP credentials present');
+    console.log('✅ Gmail credentials present');
+    console.log('🔍 Gmail Config Details:');
+    console.log('  - GMAIL_USER exists:', !!process.env.GMAIL_USER);
+    console.log('  - GMAIL_USER value:', process.env.GMAIL_USER?.substring(0, 10) + '***');
+    console.log('  - GMAIL_APP_PASSWORD exists:', !!process.env.GMAIL_APP_PASSWORD);
+    console.log('  - GMAIL_APP_PASSWORD length:', process.env.GMAIL_APP_PASSWORD?.length);
+    console.log('  - NODE_ENV:', process.env.NODE_ENV);
 
     // Find user
     const normalizedEmail = email.toLowerCase().trim();
