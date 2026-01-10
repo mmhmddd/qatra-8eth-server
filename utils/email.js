@@ -1,4 +1,4 @@
-// utils/email.js - محسّن لـ Zoho Mail على Render.com
+// utils/email.js - محسّن لـ Gmail على Render.com
 
 import nodemailer from 'nodemailer';
 
@@ -19,31 +19,29 @@ const sendEmail = async ({ to, subject, text, html }) => {
     }
 
     // التحقق من بيانات SMTP
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('❌ بيانات SMTP غير موجودة');
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+      console.error('❌ بيانات Gmail غير موجودة');
       throw new Error('إعدادات البريد الإلكتروني غير مكتملة');
     }
 
-    console.log('📋 إعدادات SMTP:');
-    console.log('  الخادم:', process.env.SMTP_HOST);
-    console.log('  المنفذ:', process.env.SMTP_PORT);
-    console.log('  المستخدم:', process.env.SMTP_USER);
+    console.log('📋 إعدادات Gmail:');
+    console.log('  الخادم: smtp.gmail.com');
+    console.log('  المنفذ: 587');
+    console.log('  المستخدم:', process.env.GMAIL_USER);
     console.log('  البيئة:', process.env.NODE_ENV || 'development');
 
-    // إعدادات Zoho محسّنة لـ Render.com
+    // إعدادات Gmail محسّنة لـ Render.com
     const transportConfig = {
-      host: process.env.SMTP_HOST || 'smtp.zoho.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false, // false للمنفذ 587
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // false للمنفذ 587 (STARTTLS)
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD
       },
-      // إعدادات حاسمة لـ Zoho على Render
-      requireTLS: true,
+      // إعدادات حاسمة لـ Gmail
       tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: true, // تغيير إلى true للأمان
+        rejectUnauthorized: true,
         minVersion: 'TLSv1.2'
       },
       // Timeouts محسّنة لـ Render
@@ -54,17 +52,19 @@ const sendEmail = async ({ to, subject, text, html }) => {
       pool: true,
       maxConnections: 5,
       maxMessages: 100,
+      rateDelta: 20000, // معدل الإرسال
+      rateLimit: 5, // عدد الرسائل في الفترة
       // Debugging
       debug: process.env.NODE_ENV !== 'production',
       logger: process.env.NODE_ENV !== 'production'
     };
 
-    console.log('🔧 إنشاء الاتصال مع Zoho...');
+    console.log('🔧 إنشاء الاتصال مع Gmail...');
     const transporter = nodemailer.createTransport(transportConfig);
     console.log('✅ تم إنشاء الاتصال');
 
     // التحقق من الاتصال (مع timeout)
-    console.log('🔍 التحقق من الاتصال بخادم Zoho...');
+    console.log('🔍 التحقق من الاتصال بخادم Gmail...');
     const verifyStartTime = Date.now();
     
     await Promise.race([
@@ -81,7 +81,7 @@ const sendEmail = async ({ to, subject, text, html }) => {
     const mailOptions = {
       from: {
         name: 'قطرة غيث',
-        address: process.env.SMTP_USER
+        address: process.env.GMAIL_USER
       },
       to: to,
       subject: subject,
@@ -92,11 +92,6 @@ const sendEmail = async ({ to, subject, text, html }) => {
         'X-Priority': '3',
         'X-Mailer': 'Qatrah Ghaith System',
         'Importance': 'normal'
-      },
-      // Envelope لضمان صحة المرسل
-      envelope: {
-        from: process.env.SMTP_USER,
-        to: to
       }
     };
 
@@ -164,7 +159,9 @@ const sendEmail = async ({ to, subject, text, html }) => {
     let userMessage = 'فشل في إرسال البريد الإلكتروني';
     
     if (error.code === 'EAUTH' || error.responseCode === 535) {
-      userMessage = 'خطأ في المصادقة: تحقق من اسم المستخدم وكلمة المرور';
+      userMessage = 'خطأ في المصادقة: تحقق من بريد Gmail وكلمة المرور';
+    } else if (error.message?.includes('Invalid login')) {
+      userMessage = 'بيانات تسجيل الدخول غير صحيحة: تأكد من استخدام App Password';
     } else if (error.code === 'ETIMEDOUT' || error.message === 'VERIFY_TIMEOUT' || error.message === 'SEND_TIMEOUT') {
       userMessage = 'انتهت مهلة الاتصال بخادم البريد';
     } else if (error.code === 'ECONNREFUSED') {

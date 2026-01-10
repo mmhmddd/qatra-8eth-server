@@ -204,7 +204,7 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.log('═══════════════════════════════════════');
     
     // Validate environment variables
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
       console.error('❌ Missing SMTP configuration');
       await session.abortTransaction();
       session.endSession();
@@ -1295,7 +1295,7 @@ router.post('/forgot-password', async (req, res) => {
     }
 
     // Verify SMTP configuration
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
       console.error('❌ SMTP credentials missing');
       return res.status(500).json({ 
         success: false,
