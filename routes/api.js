@@ -204,14 +204,14 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     console.log('═══════════════════════════════════════');
     
     // Validate environment variables
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      console.error('❌ Missing Gmail configuration');
+    if (!process.env.RESEND_API_KEY) {
+      console.error('❌ Missing Resend configuration');
       await session.abortTransaction();
       session.endSession();
       return res.status(500).json({ 
         success: false,
         message: 'خطأ في إعدادات البريد الإلكتروني',
-        error: 'GMAIL_CONFIG_MISSING'
+        error: 'RESEND_CONFIG_MISSING'
       });
     }
 
@@ -1295,23 +1295,16 @@ router.post('/forgot-password', async (req, res) => {
         message: 'البريد الإلكتروني غير صالح' 
       });
     }
-
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      console.error('❌ Gmail credentials missing');
+    if (!process.env.RESEND_API_KEY) {
+      console.error('❌ Resend API Key missing');
       return res.status(500).json({ 
         success: false,
         message: 'خطأ في إعدادات البريد الإلكتروني',
-        error: 'GMAIL_CONFIG_MISSING'
+        error: 'RESEND_CONFIG_MISSING'
       });
     }
 
-    console.log('✅ Gmail credentials present');
-    console.log('🔍 Gmail Config Details:');
-    console.log('  - GMAIL_USER exists:', !!process.env.GMAIL_USER);
-    console.log('  - GMAIL_USER value:', process.env.GMAIL_USER?.substring(0, 10) + '***');
-    console.log('  - GMAIL_APP_PASSWORD exists:', !!process.env.GMAIL_APP_PASSWORD);
-    console.log('  - GMAIL_APP_PASSWORD length:', process.env.GMAIL_APP_PASSWORD?.length);
-    console.log('  - NODE_ENV:', process.env.NODE_ENV);
+    console.log('✅ Resend API Key present');
 
     // Find user
     const normalizedEmail = email.toLowerCase().trim();

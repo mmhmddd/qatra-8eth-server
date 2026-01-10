@@ -262,8 +262,10 @@ app.get('/api/health', (req, res) => {
       cloudinary: {
         status: process.env.CLOUDINARY_CLOUD_NAME ? 'configured' : 'not configured'
       },
-      smtp: {
-        status: process.env.SMTP_USER && process.env.SMTP_PASS ? 'configured' : 'not configured'
+      resend: {
+        status: process.env.RESEND_API_KEY ? 'configured' : 'not configured',
+        apiKeyLength: process.env.RESEND_API_KEY?.length || 0,
+        fromEmail: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev'
       }
     }
   };
