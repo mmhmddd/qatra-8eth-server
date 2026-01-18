@@ -139,7 +139,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 });
 
 // View PDF
-router.get('/view/:id', authMiddleware, async (req, res) => {
+router.get('/view/:id', async (req, res) => {
   console.log('GET /api/pdf/view/:id called', { id: req.params.id, userId: req.userId });
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
