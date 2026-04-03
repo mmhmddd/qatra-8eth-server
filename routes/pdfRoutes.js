@@ -70,7 +70,7 @@ router.post('/upload', authMiddleware, upload.single('pdfFile'), async (req, res
         uploadedBy: pdf.uploadedBy.toString(),
         createdAt: pdf.createdAt
       }
-    });
+    }); 
   } catch (error) {
     console.error('Upload PDF error:', {
       message: error.message,
