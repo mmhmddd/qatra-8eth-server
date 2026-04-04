@@ -63,7 +63,7 @@ const createAdminUser = async (email, password) => {
 // Execute the script
 const run = async () => {
   await connectDB();
-  await createAdminUser('Mohammadammar5090@gmail.com', 'Omega@2022');
+  await createAdminUser('qatrahghaith@gmail.com', 'Admin123');
 };
 
 

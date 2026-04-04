@@ -11,6 +11,7 @@ import handlebars from 'handlebars';
 
 import User from './models/User.js';
 import sendEmail from './utils/email.js';
+import logger from './utils/logger.js';
 
 import leaderboardRoutes from './routes/leaderboard.js';
 import apiRoutes from './routes/api.js';
@@ -32,13 +33,10 @@ const __dirname = path.dirname(__filename);
 // ════════════════════════════════════════════════
 //     RENDER.COM SPECIFIC CONFIGURATION
 // ════════════════════════════════════════════════
-
-// Trust proxy - CRITICAL for Render.com
 app.set('trust proxy', 1);
 
-// Increase timeouts for Render.com cold starts
 app.use((req, res, next) => {
-  req.setTimeout(120000); // 2 minutes
+  req.setTimeout(120000);
   res.setTimeout(120000);
   next();
 });
@@ -54,15 +52,12 @@ const allowedOrigins = [
   'https://qatrah-ghaith.com'
 ];
 
-// CORS configuration - MUST be before routes
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, curl, etc.)
+  origin: function (origin, callback) {
     if (!origin) {
       console.log('✅ Request with no origin allowed');
       return callback(null, true);
     }
-    
     if (allowedOrigins.indexOf(origin) !== -1) {
       console.log('✅ CORS allowed for origin:', origin);
       callback(null, true);
@@ -75,19 +70,22 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Content-Length', 'Content-Type'],
-  maxAge: 86400, // 24 hours
+  maxAge: 86400,
   preflightContinue: false,
   optionsSuccessStatus: 204
 }));
 
-// Handle preflight for all routes
 app.options('*', cors());
 
-// Body parsing middlewares
+// ════════════════════════════════════════════════
+//          BODY PARSING MIDDLEWARES
+// ════════════════════════════════════════════════
 app.use(json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging middleware
+// ════════════════════════════════════════════════
+//          REQUEST LOGGING MIDDLEWARE
+// ════════════════════════════════════════════════
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`\n${'='.repeat(60)}`);
@@ -95,35 +93,29 @@ app.use((req, res, next) => {
   console.log(`Origin: ${req.get('origin') || 'no-origin'}`);
   console.log(`User-Agent: ${req.get('user-agent') || 'unknown'}`);
   console.log(`IP: ${req.ip || req.connection.remoteAddress}`);
-  
-  // Log authorization header (without exposing token)
   const authHeader = req.get('authorization');
   if (authHeader) {
     console.log(`Authorization: ${authHeader.substring(0, 20)}...`);
   }
   console.log(`${'='.repeat(60)}\n`);
-  
   next();
 });
 
-// Response time logging
 app.use((req, res, next) => {
   const start = Date.now();
-  
   res.on('finish', () => {
     const duration = Date.now() - start;
     console.log(`⏱️  ${req.method} ${req.path} - ${res.statusCode} - ${duration}ms`);
   });
-  
   next();
 });
 
 // ════════════════════════════════════════════════
-//               Cloudinary Config
+//               CLOUDINARY CONFIG
 // ════════════════════════════════════════════════
-if (!process.env.CLOUDINARY_CLOUD_NAME || 
-    !process.env.CLOUDINARY_API_KEY || 
-    !process.env.CLOUDINARY_API_SECRET) {
+if (!process.env.CLOUDINARY_CLOUD_NAME ||
+  !process.env.CLOUDINARY_API_KEY ||
+  !process.env.CLOUDINARY_API_SECRET) {
   console.error('❌ Cloudinary credentials missing in .env');
   process.exit(1);
 }
@@ -137,28 +129,27 @@ cloudinary.v2.config({
 console.log('✅ Cloudinary configured');
 
 // ════════════════════════════════════════════════
-//               MongoDB Connection
+//               MONGODB CONNECTION
 // ════════════════════════════════════════════════
 if (!process.env.MONGODB_URI) {
   console.error('❌ MONGODB_URI is not defined in .env');
   process.exit(1);
 }
 
-// MongoDB connection with retry logic for Render.com
 const connectWithRetry = async (retries = 5) => {
   for (let i = 0; i < retries; i++) {
     try {
       console.log(`🔄 Attempting MongoDB connection (attempt ${i + 1}/${retries})...`);
-      
+
       await mongoose.connect(process.env.MONGODB_URI, {
         serverSelectionTimeoutMS: 10000,
         socketTimeoutMS: 45000,
         maxPoolSize: 10,
         minPoolSize: 2,
       });
-      
+
       console.log('✅ Connected to MongoDB');
-      
+
       // Clean up old TTL indexes
       try {
         const indexes = await User.collection.indexInformation();
@@ -171,38 +162,45 @@ const connectWithRetry = async (retries = 5) => {
       } catch (err) {
         console.warn('⚠️  Could not clean TTL indexes:', err.message);
       }
-      
-      return; // Success
-      
+
+      return;
+
     } catch (err) {
       console.error(`❌ MongoDB connection attempt ${i + 1} failed:`, err.message);
-      
+      logger.error({ action: 'MONGODB_CONNECT_ATTEMPT', error: err, context: { attempt: i + 1 } });
+
       if (i < retries - 1) {
-        const delay = Math.min(1000 * Math.pow(2, i), 10000); // Exponential backoff
+        const delay = Math.min(1000 * Math.pow(2, i), 10000);
         console.log(`⏳ Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
         console.error('❌ All MongoDB connection attempts failed');
+        logger.error({ action: 'MONGODB_ALL_ATTEMPTS_FAILED', error: err, context: { totalAttempts: retries } });
         process.exit(1);
       }
     }
   }
 };
 
-// Handle MongoDB connection events
+// ════════════════════════════════════════════════
+//          MONGOOSE CONNECTION EVENTS
+// ════════════════════════════════════════════════
 mongoose.connection.on('connected', () => {
   console.log('✅ Mongoose connected to MongoDB');
+  logger.mongoConnected();
 });
 
 mongoose.connection.on('error', (err) => {
   console.error('❌ Mongoose connection error:', err);
+  logger.error({ action: 'MONGOOSE_CONNECTION_ERROR', error: err });
 });
 
 mongoose.connection.on('disconnected', () => {
   console.warn('⚠️  Mongoose disconnected from MongoDB');
+  logger.mongoDisconnected({ reason: 'mongoose_disconnected_event' });
 });
 
-// Graceful shutdown
+// Graceful shutdown on SIGINT
 process.on('SIGINT', async () => {
   try {
     await mongoose.connection.close();
@@ -210,6 +208,7 @@ process.on('SIGINT', async () => {
     process.exit(0);
   } catch (err) {
     console.error('❌ Error closing MongoDB connection:', err);
+    logger.error({ action: 'SIGINT_CLOSE', error: err });
     process.exit(1);
   }
 });
@@ -218,7 +217,7 @@ process.on('SIGINT', async () => {
 await connectWithRetry();
 
 // ════════════════════════════════════════════════
-//               Email Template Helper
+//          EMAIL TEMPLATE HELPER
 // ════════════════════════════════════════════════
 async function getEmailTemplate(data) {
   try {
@@ -228,18 +227,17 @@ async function getEmailTemplate(data) {
     return template(data);
   } catch (error) {
     console.error('Email template error:', error);
+    logger.error({ action: 'EMAIL_TEMPLATE_READ', error });
     throw error;
   }
 }
 
 // ════════════════════════════════════════════════
-//            HEALTH CHECK ENDPOINTS
+//          HEALTH CHECK ENDPOINTS
 // ════════════════════════════════════════════════
-
-// Basic health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
@@ -247,7 +245,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Detailed health check
 app.get('/api/health', (req, res) => {
   const healthcheck = {
     status: 'ok',
@@ -269,11 +266,9 @@ app.get('/api/health', (req, res) => {
       }
     }
   };
-  
   res.json(healthcheck);
 });
 
-// Keep-alive endpoint for preventing cold starts
 app.get('/api/ping', (req, res) => {
   res.json({ pong: true, timestamp: Date.now() });
 });
@@ -283,30 +278,32 @@ app.get('/api/ping', (req, res) => {
 // ════════════════════════════════════════════════
 console.log('📝 Registering routes...');
 
-app.use('/api/leaderboard',        leaderboardRoutes);
-app.use('/api',                     apiRoutes);
-app.use('/api/pdf',                 pdfRoutes);
-app.use('/api/testimonials',        testimonialsRoutes);
-app.use('/api/lectures',            lectureRoutes);
-app.use('/api/gallery',             galleryRoutes);
-app.use('/api/lecture-requests',    lectureRequestRoutes);
-app.use('/api/forgot-password',     forgetPasswordRoutes);
-app.use('/api/reset-password',      forgetPasswordRoutes);
-app.use('/api/messages',            messageRoutes);
+app.use('/api/leaderboard',       leaderboardRoutes);
+app.use('/api',                   apiRoutes);
+app.use('/api/pdf',               pdfRoutes);
+app.use('/api/testimonials',      testimonialsRoutes);
+app.use('/api/lectures',          lectureRoutes);
+app.use('/api/gallery',           galleryRoutes);
+app.use('/api/lecture-requests',  lectureRequestRoutes);
+app.use('/api/forgot-password',   forgetPasswordRoutes);
+app.use('/api/reset-password',    forgetPasswordRoutes);
+app.use('/api/messages',          messageRoutes);
 
 console.log('✅ All routes registered');
 
 // Deprecated uploads path
 app.get('/api/Uploads/*', (req, res) => {
-  res.status(410).json({ 
-    message: 'هذا المسار القديم لم يعد مدعومًا. استخدم /api/gallery/images للصور.' 
+  res.status(410).json({
+    message: 'هذا المسار القديم لم يعد مدعومًا. استخدم /api/gallery/images للصور.'
   });
 });
 
-// 404 handler
+// ════════════════════════════════════════════════
+//               404 HANDLER
+// ════════════════════════════════════════════════
 app.use((req, res) => {
   console.log(`❌ 404 → ${req.method} ${req.originalUrl}`);
-  res.status(404).json({ 
+  res.status(404).json({
     success: false,
     message: `Cannot ${req.method} ${req.originalUrl}`,
     availableRoutes: [
@@ -320,7 +317,9 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
+// ════════════════════════════════════════════════
+//               GLOBAL ERROR HANDLER
+// ════════════════════════════════════════════════
 app.use((err, req, res, next) => {
   console.error('═══════════════════════════════════════');
   console.error('❌ Global error handler:');
@@ -329,7 +328,13 @@ app.use((err, req, res, next) => {
   console.error('Error:', err);
   console.error('Stack:', err.stack);
   console.error('═══════════════════════════════════════');
-  
+
+  logger.error({
+    action: 'GLOBAL_ERROR_HANDLER',
+    error: err,
+    context: { path: req.path, method: req.method }
+  });
+
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'خطأ في الخادم',
@@ -341,7 +346,7 @@ app.use((err, req, res, next) => {
 });
 
 // ════════════════════════════════════════════════
-//             DAILY MEETING REMINDER JOB
+//          DAILY MEETING REMINDER JOB
 // ════════════════════════════════════════════════
 cron.schedule('1 0 * * *', async () => {
   console.log('⏰ Daily meeting reminder check:', new Date().toLocaleString('ar-EG'));
@@ -358,7 +363,7 @@ cron.schedule('1 0 * * *', async () => {
     console.log(`📧 Found ${users.length} users with meetings today`);
 
     for (const user of users) {
-      const meetingsToday = user.meetings.filter(m => 
+      const meetingsToday = user.meetings.filter(m =>
         !m.reminded && m.date >= startOfDay && m.date <= endOfDay
       );
 
@@ -391,16 +396,56 @@ cron.schedule('1 0 * * *', async () => {
           { $set: { 'meetings.$.reminded': true } }
         );
       }
-      
+
       console.log(`✅ Sent reminder to ${user.email}`);
     }
   } catch (err) {
     console.error('❌ Daily reminder job failed:', err);
+    logger.error({ action: 'CRON_DAILY_REMINDER', error: err });
   }
 });
 
 // ════════════════════════════════════════════════
-//                    START SERVER
+//          PERIODIC DB INTEGRITY CHECK (every 6 hours)
+// ════════════════════════════════════════════════
+cron.schedule('0 */6 * * *', async () => {
+  console.log('🔍 Running DB integrity check...');
+  try {
+    const { default: JoinRequest } = await import('./models/JoinRequest.js');
+
+    const approvedMembers = await JoinRequest.find({ status: 'Approved' });
+    let missingCount = 0;
+
+    for (const member of approvedMembers) {
+      const user = await User.findOne({ email: member.email.toLowerCase().trim() });
+      if (!user) {
+        missingCount++;
+        logger.dbAnomaly({
+          type: 'APPROVED_MEMBER_WITHOUT_USER_ACCOUNT',
+          details: {
+            memberId: member._id,
+            email: member.email,
+            name: member.name,
+            approvedAt: member.updatedAt
+          },
+          severity: 'CRITICAL'
+        });
+      }
+    }
+
+    if (missingCount === 0) {
+      console.log('✅ DB integrity check passed — all approved members have accounts');
+    } else {
+      console.error(`🚨 DB integrity check: ${missingCount} approved members WITHOUT user accounts!`);
+    }
+  } catch (err) {
+    console.error('❌ DB integrity check failed:', err.message);
+    logger.error({ action: 'CRON_DB_INTEGRITY_CHECK', error: err });
+  }
+});
+
+// ════════════════════════════════════════════════
+//               START SERVER
 // ════════════════════════════════════════════════
 const PORT = process.env.PORT || 5000;
 
@@ -415,23 +460,29 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('\n🌐 Allowed CORS origins:');
   allowedOrigins.forEach(o => console.log(`   ✓ ${o}`));
   console.log('═'.repeat(60) + '\n');
+
+  // ✅ LOG SERVER START
+  logger.serverStarted({
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development',
+    mongoState: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
 
 // Set server timeouts for Render.com
-server.timeout = 120000; // 2 minutes
-server.keepAliveTimeout = 65000; // 65 seconds
-server.headersTimeout = 66000; // 66 seconds
+server.timeout = 120000;
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
-// Handle server errors
 server.on('error', (error) => {
   console.error('❌ Server error:', error);
+  logger.error({ action: 'SERVER_ERROR', error });
   if (error.code === 'EADDRINUSE') {
     console.error(`Port ${PORT} is already in use`);
     process.exit(1);
   }
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('⚠️  SIGTERM signal received: closing HTTP server');
   server.close(() => {
