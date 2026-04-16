@@ -150,13 +150,23 @@ const connectWithRetry = async (retries = 5) => {
 
       console.log('✅ Connected to MongoDB');
 
-      // Clean up old TTL indexes
+      // ✅ FIXED: Correctly detect and drop TTL indexes using listIndexes()
       try {
-        const indexes = await User.collection.indexInformation();
-        for (const [name, index] of Object.entries(indexes)) {
-          if ('expireAfterSeconds' in index) {
-            await User.collection.dropIndex(name);
-            console.log(`🗑️  Dropped old TTL index: ${name}`);
+        const rawIndexes = await User.collection.listIndexes().toArray();
+        const ttlIndexes = rawIndexes.filter(
+          idx => idx.expireAfterSeconds !== undefined
+        );
+
+        if (ttlIndexes.length === 0) {
+          console.log('✅ No TTL indexes found on users collection');
+        } else {
+          for (const idx of ttlIndexes) {
+            await User.collection.dropIndex(idx.name);
+            console.log(`🗑️  Dropped TTL index: "${idx.name}"`);
+            logger.info?.({
+              action: 'TTL_INDEX_DROPPED',
+              context: { indexName: idx.name }
+            });
           }
         }
       } catch (err) {
@@ -346,7 +356,7 @@ app.use((err, req, res, next) => {
 });
 
 // ════════════════════════════════════════════════
-//          DAILY MEETING REMINDER JOB
+//          DAILY MEETING REMINDER JOB (00:01 AM)
 // ════════════════════════════════════════════════
 cron.schedule('1 0 * * *', async () => {
   console.log('⏰ Daily meeting reminder check:', new Date().toLocaleString('ar-EG'));
@@ -406,6 +416,45 @@ cron.schedule('1 0 * * *', async () => {
 });
 
 // ════════════════════════════════════════════════
+//   DAILY EXPIRED MESSAGES CLEANUP (02:00 AM)
+//   يحذف الرسائل المنتهية من قاعدة البيانات
+//   دون المساس بأي بيانات أخرى للمستخدم
+// ════════════════════════════════════════════════
+cron.schedule('0 2 * * *', async () => {
+  console.log('🧹 Running expired messages cleanup:', new Date().toLocaleString('ar-EG'));
+  try {
+    const now = new Date();
+
+    // يحذف الرسائل المنتهية من كل المستخدمين دفعة واحدة
+    // $pull يحذف فقط عناصر المصفوفة — لا يحذف المستخدم نفسه أبداً
+    const result = await User.updateMany(
+      { 'messages.0': { $exists: true } }, // فقط المستخدمين الذين لديهم رسائل
+      {
+        $pull: {
+          messages: { displayUntil: { $lte: now } }
+        }
+      }
+    );
+
+    console.log(
+      `✅ Expired messages cleanup done — modified ${result.modifiedCount} user(s)`
+    );
+
+    logger.info?.({
+      action: 'CRON_EXPIRED_MESSAGES_CLEANUP',
+      context: {
+        modifiedCount: result.modifiedCount,
+        timestamp: now.toISOString()
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Expired messages cleanup failed:', err.message);
+    logger.error({ action: 'CRON_EXPIRED_MESSAGES_CLEANUP', error: err });
+  }
+});
+
+// ════════════════════════════════════════════════
 //          PERIODIC DB INTEGRITY CHECK (every 6 hours)
 // ════════════════════════════════════════════════
 cron.schedule('0 */6 * * *', async () => {
@@ -461,7 +510,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   allowedOrigins.forEach(o => console.log(`   ✓ ${o}`));
   console.log('═'.repeat(60) + '\n');
 
-  // ✅ LOG SERVER START
   logger.serverStarted({
     port: PORT,
     environment: process.env.NODE_ENV || 'development',

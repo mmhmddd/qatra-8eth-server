@@ -1,3 +1,5 @@
+// api.js
+
 import express from 'express';
 import { hash, compare } from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -16,7 +18,7 @@ import validator from 'validator';
 import { v2 as cloudinary } from 'cloudinary';
 import crypto from 'crypto';
 import handlebars from 'handlebars';
-import logger from '../utils/logger.js'; // ← استيراد اللوجر
+import logger from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -30,11 +32,24 @@ cloudinary.config({
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ════════════════════════════════════════════════
+//  HELPER: purge expired messages from a user doc
+//  Call this any time you load a user and may read
+//  or display their messages. Saves only if changed.
+// ════════════════════════════════════════════════
+async function purgeExpiredMessages(user) {
+  if (!Array.isArray(user.messages) || user.messages.length === 0) return;
+  const now = new Date();
+  const before = user.messages.length;
+  user.messages = user.messages.filter(m => m.displayUntil > now);
+  if (user.messages.length !== before) {
+    await user.save();
+  }
+}
+
 async function getResetEmailTemplate(data) {
   try {
     const templatePath = path.join(__dirname, '../reset-password-email.html');
-    console.log('مسار ملف القالب (إعادة تعيين):', templatePath);
-    console.log('هل ملف القالب موجود؟', existsSync(templatePath));
     if (!existsSync(templatePath)) {
       throw new Error(`ملف القالب غير موجود في المسار: ${templatePath}`);
     }
@@ -129,7 +144,6 @@ router.post('/join-requests', async (req, res) => {
     const joinRequest = new JoinRequest({ name, email: normalizedEmail, number, academicSpecialization, address, subjects: subjects || [] });
     await joinRequest.save({ session });
 
-    // ✅ LOG
     logger.joinRequestCreated({ requestId: joinRequest._id, email: normalizedEmail, name });
 
     await session.commitTransaction(); session.endSession();
@@ -224,11 +238,11 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
         lectureCount: 0,
         role: 'user',
         profileImage: null,
-        profileImagePublicId: null
+        profileImagePublicId: null,
+        messages: []
       });
       await user.save({ session });
 
-      // ✅ LOG NEW USER
       logger.userCreated({
         email: normalizedEmail,
         userId: user._id,
@@ -242,7 +256,6 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
       logger.userUpdated({ email: normalizedEmail, userId: user._id, changes: { subjects: 'merged' }, updatedBy: `admin:${req.userId}` });
     }
 
-    // ✅ LOG APPROVAL
     logger.joinRequestApproved({
       requestId: joinRequest._id,
       email: normalizedEmail,
@@ -255,7 +268,6 @@ router.post('/join-requests/:id/approve', authMiddleware, adminMiddleware, async
     await session.commitTransaction();
     session.endSession();
 
-    // Send email async
     const emailPromise = (async () => {
       try {
         const loginUrl = `${process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com'}/login`;
@@ -303,7 +315,6 @@ router.post('/join-requests/:id/reject', authMiddleware, adminMiddleware, async 
     joinRequest.status = 'Rejected';
     await joinRequest.save();
 
-    // ✅ LOG
     logger.joinRequestRejected({ requestId: joinRequest._id, email: joinRequest.email, name: joinRequest.name, rejectedBy: req.userId });
 
     res.json({ message: 'تم رفض الطلب' });
@@ -333,7 +344,6 @@ router.delete('/members/:id', authMiddleware, adminMiddleware, async (req, res) 
     const user = await User.findOne({ email: joinRequest.email.toLowerCase().trim() }).session(session);
     if (!user) { await session.abortTransaction(); session.endSession(); return res.status(404).json({ message: 'حساب المستخدم غير موجود' }); }
 
-    // ✅ LOG BEFORE DELETE (capture all data first)
     logger.memberDeleted({ memberId, email: joinRequest.email, name: joinRequest.name, deletedBy: req.userId });
     logger.userDeleted({ email: user.email, userId: user._id, name: joinRequest.name, deletedBy: `admin:${req.userId}`, reason: 'ADMIN_MEMBER_DELETE', requestId: memberId });
 
@@ -369,7 +379,6 @@ router.delete('/join-requests/:id', authMiddleware, async (req, res) => {
     const joinRequest = await JoinRequest.findById(requestId);
     if (!joinRequest) return res.status(404).json({ message: 'الطلب غير موجود' });
 
-    // ✅ LOG BEFORE DELETE
     logger.joinRequestDeleted({ requestId: joinRequest._id, email: joinRequest.email, name: joinRequest.name, status: joinRequest.status, deletedBy: req.userId });
 
     await JoinRequest.deleteOne({ _id: requestId });
@@ -389,7 +398,6 @@ router.get('/approved-members', authMiddleware, adminMiddleware, async (req, res
     const membersWithDetails = await Promise.all(approvedMembers.map(async (member) => {
       const user = await User.findOne({ email: member.email.toLowerCase().trim() });
 
-      // ✅ ANOMALY DETECTION: approved member but no user account!
       if (!user) {
         logger.dbAnomaly({
           type: 'APPROVED_MEMBER_WITHOUT_USER_ACCOUNT',
@@ -397,6 +405,9 @@ router.get('/approved-members', authMiddleware, adminMiddleware, async (req, res
           severity: 'CRITICAL'
         });
       }
+
+      // ✅ Purge expired messages without deleting the user
+      if (user) await purgeExpiredMessages(user);
 
       const lecturesWithStudentNames = user?.lectures.map(lecture => ({
         ...lecture.toObject(),
@@ -437,7 +448,6 @@ router.get('/members/:id', authMiddleware, async (req, res) => {
 
     const user = await User.findOne({ email: member.email.toLowerCase().trim() });
 
-    // ✅ ANOMALY DETECTION
     if (!user && member.status === 'Approved') {
       logger.dbAnomaly({
         type: 'APPROVED_MEMBER_WITHOUT_USER_ACCOUNT',
@@ -445,6 +455,9 @@ router.get('/members/:id', authMiddleware, async (req, res) => {
         severity: 'CRITICAL'
       });
     }
+
+    // ✅ Purge expired messages without deleting the user
+    if (user) await purgeExpiredMessages(user);
 
     const lecturesWithStudentNames = user?.lectures.map(lecture => ({
       ...lecture.toObject(),
@@ -499,6 +512,12 @@ router.put('/members/:id/update-details', authMiddleware, adminMiddleware, async
       }
     }
 
+    // ✅ Purge expired messages in-memory before saving (no TTL delete risk)
+    if (Array.isArray(user.messages)) {
+      const now = new Date();
+      user.messages = user.messages.filter(m => m.displayUntil > now);
+    }
+
     member.volunteerHours = volunteerHours;
     member.students = students.map(s => ({ ...s, email: s.email.toLowerCase().trim() }));
     member.subjects = subjects;
@@ -509,7 +528,6 @@ router.put('/members/:id/update-details', authMiddleware, adminMiddleware, async
     await Promise.all([member.save({ session }), user.save({ session })]);
     await session.commitTransaction(); session.endSession();
 
-    // ✅ LOG
     logger.memberUpdated({ memberId: member._id, email: member.email, name: member.name, changes: { volunteerHours, numberOfStudents, studentsCount: students.length, subjects }, updatedBy: req.userId });
 
     res.json({ message: 'تم تحديث التفاصيل بنجاح', volunteerHours: member.volunteerHours, numberOfStudents: user.numberOfStudents, students: user.students, subjects: user.subjects });
@@ -559,7 +577,6 @@ router.post('/members/:id/add-student', authMiddleware, async (req, res) => {
     await Promise.all([member.save({ session }), user.save({ session })]);
     await session.commitTransaction(); session.endSession();
 
-    // ✅ LOG
     logger.studentAdded({ memberId: member._id, memberEmail: member.email, studentEmail: normalizedEmail, studentName: name });
 
     res.json({ message: 'تم إضافة الطالب بنجاح', student: newStudent, numberOfStudents: user.numberOfStudents, subjects: user.subjects });
@@ -594,9 +611,11 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'بيانات تسجيل الدخول غير صحيحة' });
     }
 
+    // ✅ Purge expired messages on login (safe, application-level)
+    await purgeExpiredMessages(user);
+
     const token = sign({ userId: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-    // ✅ LOG
     logger.loginSuccess({ email: normalizedEmail, userId: user._id, ip, role: user.role });
 
     res.json({ token, userId: user._id, role: user.role });
@@ -616,14 +635,12 @@ router.get('/profile', authMiddleware, async (req, res) => {
 
     const joinRequest = await JoinRequest.findOne({ email: user.email.toLowerCase().trim() });
 
-    // ✅ ANOMALY: user exists but no join request
     if (!joinRequest) {
       logger.dbAnomaly({ type: 'USER_WITHOUT_JOIN_REQUEST', details: { userId: user._id, email: user.email }, severity: 'HIGH' });
     }
 
-    const currentDate = new Date();
-    user.messages = user.messages.filter(m => m.displayUntil > currentDate);
-    await user.save();
+    // ✅ Purge expired messages safely in application code
+    await purgeExpiredMessages(user);
 
     const lecturesWithStudentNames = user.lectures.map(lecture => ({
       ...lecture.toObject(),
@@ -665,7 +682,6 @@ router.put('/profile/password', authMiddleware, async (req, res) => {
     user.password = await hash(newPassword, 10);
     await user.save();
 
-    // ✅ LOG
     logger.passwordChanged({ email: user.email, userId: user._id, ip });
 
     res.json({ success: true, message: 'تم تحديث كلمة المرور بنجاح' });
@@ -704,7 +720,6 @@ router.post('/profile/image', authMiddleware, upload.single('profileImage'), asy
     user.profileImagePublicId = uploadResult.public_id;
     await user.save();
 
-    // ✅ LOG
     logger.profileImageUploaded({ email: user.email, userId: user._id, publicId: uploadResult.public_id, url: uploadResult.secure_url });
 
     res.json({ success: true, message: 'تم رفع الصورة الشخصية بنجاح', data: { profileImage: uploadResult.secure_url, fileName: req.file.originalname, fileSize: req.file.size } });
@@ -738,7 +753,7 @@ router.delete('/profile/image', authMiddleware, async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
-//               MEETINGS (unchanged logic, added error logs)
+//               MEETINGS
 // ════════════════════════════════════════════════
 router.post('/profile/meetings', authMiddleware, async (req, res) => {
   try {
@@ -843,7 +858,6 @@ router.post('/forgot-password', async (req, res) => {
     user.tokenExpire = Date.now() + 3600000;
     await user.save();
 
-    // ✅ LOG
     logger.passwordResetRequested({ email: normalizedEmail, ip });
 
     const frontendUrl = process.env.FRONTEND_URL || 'https://www.qatrah-ghaith.com';
@@ -875,7 +889,7 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════
-//               ADMIN MESSAGES (unchanged + error logs)
+//               ADMIN MESSAGES
 // ════════════════════════════════════════════════
 router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -889,6 +903,9 @@ router.post('/admin/send-message', authMiddleware, adminMiddleware, async (req, 
     if (!joinRequest) return res.status(404).json({ message: 'طلب الانضمام غير موجود' });
     const targetUser = await User.findOne({ email: joinRequest.email.toLowerCase().trim() });
     if (!targetUser) return res.status(404).json({ message: 'المستخدم غير موجود' });
+
+    // ✅ Purge expired messages before checking for active ones
+    await purgeExpiredMessages(targetUser);
 
     const now = new Date();
     if (targetUser.messages?.length > 0) {

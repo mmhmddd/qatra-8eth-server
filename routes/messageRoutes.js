@@ -1,3 +1,5 @@
+// messageRoutes.js
+
 import express from 'express';
 import Message from '../models/message.js';
 import authMiddleware from '../middleware/auth.js';

@@ -1,4 +1,4 @@
-// Updated file: models/User.js
+// models/User.js
 import { Schema, model } from 'mongoose';
 
 const userSchema = new Schema({
@@ -6,7 +6,7 @@ const userSchema = new Schema({
     type: String,
     required: true,
     unique: true,
-    lowercase: true, 
+    lowercase: true,
     trim: true
   },
   password: {
@@ -57,7 +57,7 @@ const userSchema = new Schema({
     date: { type: Date, required: true },
     startTime: { type: String, required: true },
     endTime: { type: String, required: true },
-    reminded: { type: Boolean, default: false }  
+    reminded: { type: Boolean, default: false }
   }],
   lectures: [{
     link: { type: String, required: true },
@@ -87,13 +87,13 @@ const userSchema = new Schema({
     default: null
   },
   messages: [{
+
     content: { type: String, required: true },
     createdAt: { type: Date, default: Date.now },
-    displayUntil: { type: Date, required: true, index: { expires: 0 } }
+    displayUntil: { type: Date, required: true }
   }]
 });
 
 userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ 'messages.displayUntil': 1 }, { expireAfterSeconds: 0 });
 
 export default model('User', userSchema);
