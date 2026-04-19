@@ -415,20 +415,14 @@ cron.schedule('1 0 * * *', async () => {
   }
 });
 
-// ════════════════════════════════════════════════
-//   DAILY EXPIRED MESSAGES CLEANUP (02:00 AM)
-//   يحذف الرسائل المنتهية من قاعدة البيانات
-//   دون المساس بأي بيانات أخرى للمستخدم
-// ════════════════════════════════════════════════
+
 cron.schedule('0 2 * * *', async () => {
   console.log('🧹 Running expired messages cleanup:', new Date().toLocaleString('ar-EG'));
   try {
     const now = new Date();
 
-    // يحذف الرسائل المنتهية من كل المستخدمين دفعة واحدة
-    // $pull يحذف فقط عناصر المصفوفة — لا يحذف المستخدم نفسه أبداً
     const result = await User.updateMany(
-      { 'messages.0': { $exists: true } }, // فقط المستخدمين الذين لديهم رسائل
+      { 'messages.0': { $exists: true } }, 
       {
         $pull: {
           messages: { displayUntil: { $lte: now } }
