@@ -8,7 +8,10 @@ const router = express.Router();
 
 const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
-  const isValid = file.mimetype === 'application/pdf' && /\.pdf$/.test(file.originalname.toLowerCase());
+  // Decode filename from latin1 to UTF-8 to correctly handle Arabic filenames
+  file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+  const isValid = file.mimetype === 'application/pdf' && /\.pdf$/i.test(file.originalname);
   if (isValid) {
     cb(null, true);
   } else {

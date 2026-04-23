@@ -11,7 +11,11 @@ const router = express.Router();
 const storage = multer.memoryStorage();
 const fileFilter = (req, file, cb) => {
   console.log('Multer file filter:', file.originalname, file.mimetype);
-  const isValid = file.mimetype === 'application/pdf' && /\.pdf$/.test(file.originalname.toLowerCase());
+
+  // Decode the filename from latin1 to UTF-8 to handle Arabic filenames sent by browsers
+  file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+
+  const isValid = file.mimetype === 'application/pdf' && /\.pdf$/i.test(file.originalname);
   if (isValid) {
     cb(null, true);
   } else {
@@ -85,9 +89,8 @@ router.get('/list', async (req, res) => {
   try {
     const pdfs = await PDF.find()
       .select('title description creatorName subject semester country academicLevel fileName uploadedBy createdAt')
-      .populate('uploadedBy', 'email'); // Optionally populate user email
+      .populate('uploadedBy', 'email');
 
-    // Map the PDFs to match the frontend Pdf interface
     const pdfList = pdfs.map(pdf => ({
       id: pdf._id.toString(),
       title: pdf.title,
@@ -140,7 +143,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
 // View PDF
 router.get('/view/:id', async (req, res) => {
-  console.log('GET /api/pdf/view/:id called', { id: req.params.id, userId: req.userId });
+  console.log('GET /api/pdf/view/:id called', { id: req.params.id });
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'معرف الملف غير صالح' });
@@ -151,17 +154,20 @@ router.get('/view/:id', async (req, res) => {
       return res.status(404).json({ message: 'الملف غير موجود' });
     }
 
+    // RFC 5987 encoding: supports Arabic and all Unicode filenames correctly
+    const encodedFileName = encodeURIComponent(pdf.fileName).replace(/'/g, '%27');
+
     res.set({
       'Content-Type': pdf.mimeType,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(pdf.fileName)}"`
+      // fallback ASCII name + RFC 5987 UTF-8 name for full browser support
+      'Content-Disposition': `inline; filename="file.pdf"; filename*=UTF-8''${encodedFileName}`
     });
     res.send(pdf.fileData);
   } catch (error) {
     console.error('View PDF error:', {
       message: error.message,
       stack: error.stack,
-      id: req.params.id,
-      userId: req.userId
+      id: req.params.id
     });
     res.status(500).json({ message: 'خطأ في عرض الملف', error: error.message });
   }

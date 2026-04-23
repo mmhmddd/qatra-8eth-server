@@ -1,3 +1,4 @@
+// models/lectireRequest.js
 import mongoose from 'mongoose';
 
 const lectureRequestSchema = new mongoose.Schema({

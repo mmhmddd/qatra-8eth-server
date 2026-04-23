@@ -1,3 +1,5 @@
+// routes/lectureRoutes.js
+
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
@@ -38,6 +40,14 @@ const adminMiddleware = (req, res, next) => {
     return res.status(403).json({ message: 'You must be an admin to access this route' });
   }
   next();
+};
+
+// Helper to safely convert a value to ISO string
+const toISOStringSafe = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? String(value) : d.toISOString();
 };
 
 // Submit a lecture request
@@ -99,7 +109,7 @@ router.post('/', authMiddleware, async (req, res) => {
     if (!Array.isArray(user.students) || !user.students.some(s => s.email.toLowerCase().trim() === normalizedStudentEmail)) {
       await session.abortTransaction();
       session.endSession();
-      console.error('Student not found in user’s students list:', normalizedStudentEmail);
+      console.error('Student not found in user\'s students list:', normalizedStudentEmail);
       return res.status(400).json({ message: 'Student not found' });
     }
 
@@ -150,32 +160,84 @@ router.get('/requests', authMiddleware, adminMiddleware, async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Fetch JoinRequest for each user to use as a fallback for name
+    // Build the response array safely
     const requestsWithUserNames = await Promise.all(
-      requests.map(async (req) => {
-        let userName = req.userId.name;
-        // If user.name is missing, try fetching from JoinRequest
-        if (!userName) {
-          const joinRequest = await JoinRequest.findOne({ email: req.userId.email.toLowerCase().trim() }).lean();
-          userName = joinRequest?.name || 'Unknown';
-        }
-        return {
-          _id: req._id.toString(),
-          link: req.link,
-          name: req.name,
-          subject: req.subject,
-          studentEmail: req.studentEmail,
-          lectureDate: req.lectureDate.toISOString(),
-          duration: req.duration,
-          createdAt: req.createdAt.toISOString(),
-          status: req.status,
-          adminNote: req.adminNote || '',
-          user: {
-            _id: req.userId._id.toString(),
-            name: userName,
-            email: req.userId.email
+      requests.map(async (item) => {
+        try {
+          // userId might be null if the user was deleted
+          if (!item.userId) {
+            return {
+              _id: item._id ? item._id.toString() : '',
+              link: item.link || '',
+              name: item.name || '',
+              subject: item.subject || '',
+              studentEmail: item.studentEmail || '',
+              lectureDate: toISOStringSafe(item.lectureDate),
+              duration: item.duration || 0,
+              createdAt: toISOStringSafe(item.createdAt),
+              status: item.status || 'pending',
+              adminNote: item.adminNote || '',
+              user: {
+                _id: '',
+                name: 'Unknown',
+                email: 'Unknown'
+              }
+            };
           }
-        };
+
+          let userName = item.userId.name;
+
+          // If user.name is missing, try fetching from JoinRequest
+          if (!userName) {
+            try {
+              const joinRequest = await JoinRequest.findOne({
+                email: item.userId.email ? item.userId.email.toLowerCase().trim() : ''
+              }).lean();
+              userName = joinRequest?.name || 'Unknown';
+            } catch (joinErr) {
+              console.warn('Could not fetch JoinRequest for user:', item.userId._id, joinErr.message);
+              userName = 'Unknown';
+            }
+          }
+
+          return {
+            _id: item._id ? item._id.toString() : '',
+            link: item.link || '',
+            name: item.name || '',
+            subject: item.subject || '',
+            studentEmail: item.studentEmail || '',
+            lectureDate: toISOStringSafe(item.lectureDate),
+            duration: item.duration || 0,
+            createdAt: toISOStringSafe(item.createdAt),
+            status: item.status || 'pending',
+            adminNote: item.adminNote || '',
+            user: {
+              _id: item.userId._id ? item.userId._id.toString() : '',
+              name: userName,
+              email: item.userId.email || ''
+            }
+          };
+        } catch (itemErr) {
+          console.error('Error processing request item:', item._id, itemErr.message);
+          // Return a safe fallback instead of crashing the whole request
+          return {
+            _id: item._id ? item._id.toString() : '',
+            link: item.link || '',
+            name: item.name || '',
+            subject: item.subject || '',
+            studentEmail: item.studentEmail || '',
+            lectureDate: toISOStringSafe(item.lectureDate),
+            duration: item.duration || 0,
+            createdAt: toISOStringSafe(item.createdAt),
+            status: item.status || 'pending',
+            adminNote: item.adminNote || '',
+            user: {
+              _id: '',
+              name: 'Unknown',
+              email: 'Unknown'
+            }
+          };
+        }
       })
     );
 
@@ -185,7 +247,7 @@ router.get('/requests', authMiddleware, adminMiddleware, async (req, res) => {
       requests: requestsWithUserNames
     });
   } catch (error) {
-    console.error('Error fetching lecture requests:', error.message);
+    console.error('Error fetching lecture requests:', error.message, error.stack);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
@@ -278,8 +340,8 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
     await session.commitTransaction();
     session.endSession();
 
-    // Send email to user
-    await sendEmail({
+    // Send email to user (non-blocking)
+    sendEmail({
       to: user.email,
       subject: 'Lecture Request Accepted',
       html: `
@@ -288,143 +350,32 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
 <head>
   <meta charset="UTF-8">
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 0;
-      direction: rtl;
-      text-align: right;
-    }
-    .container {
-      max-width: 660px;
-      margin: 0 auto;
-      background-color: #71a7b1;
-      border-radius: 8px;
-    }
-    .header {
-      padding: 12px 24px;
-      border-radius: 8px 8px 0 0;
-    }
-    .content {
-      padding: 24px;
-      background-color: #ffffff;
-      border-radius: 16px;
-      margin: 16px;
-      border: 2px solid #000000;
-      direction: rtl;
-      text-align: right;
-    }
-    h2 {
-      color: #333;
-      font-size: 24px;
-      margin: 0 0 16px;
-      text-align: right;
-    }
-    p {
-      color: #555;
-      font-size: 16px;
-      line-height: 1.6;
-      text-align: right;
-    }
-    ul {
-      list-style: none;
-      padding: 0;
-      margin: 16px 0;
-      direction: rtl;
-      text-align: right;
-    }
-    li {
-      margin-bottom: 12px;
-      font-size: 14px;
-      text-align: right;
-    }
-    .button {
-      display: inline-block;
-      padding: 10px 20px;
-      background-color: #007bff;
-      color: #ffffff;
-      text-decoration: none;
-      border-radius: 5px;
-      margin: 16px 0;
-    }
-    .social-icons {
-      text-align: center;
-      padding: 12px 0;
-    }
-    .social-icons a {
-      margin: 0 21px;
-      display: inline-block;
-    }
-    .footer {
-      background-color: #f4f4f4;
-      padding: 12px 16px;
-      font-size: 11px;
-      text-align: center;
-      color: #555;
-    }
-    img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 8px;
-    }
+    body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; direction: rtl; text-align: right; }
+    .content { padding: 24px; background-color: #ffffff; border-radius: 16px; margin: 16px; border: 2px solid #000000; }
+    h2 { color: #333; font-size: 24px; margin: 0 0 16px; }
+    p { color: #555; font-size: 16px; line-height: 1.6; }
+    ul { list-style: none; padding: 0; margin: 16px 0; }
+    li { margin-bottom: 12px; font-size: 14px; }
+    .footer { background-color: #f4f4f4; padding: 12px 16px; font-size: 11px; text-align: center; color: #555; }
   </style>
 </head>
 <body dir="rtl">
-  <center>
-    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4; direction: rtl; text-align: right;">
-      <tbody>
-        <tr>
-          <td align="center" valign="top" dir="rtl">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px; direction: rtl; text-align: right;">
-              <tbody>
-
-                <tr>
-                  <td class="content" valign="top" dir="rtl" style="direction: rtl; text-align: right;">
-                    <h2 style="text-align: right;">تم قبول طلب المحاضرة</h2>
-                    <p style="text-align: right;">تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
-                    <p style="text-align: right;">التفاصيل:</p>
-                    <ul style="text-align: right;">
-                      <li style="text-align: right;"><strong>المادة:</strong> ${lectureRequest.subject}</li>
-                      <li style="text-align: right;"><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
-                      <li style="text-align: right;"><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-                      <li style="text-align: right;"><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
-                    </ul>
-                    <p style="text-align: right;">شكراً لمساهمتك!</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="social-icons" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
-                    <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
-                      <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
-                    </a>
-                    <a href="https://www.instagram.com/qatrah_ghaith?igsh=OGNvNDU1MGxpMWNs" target="_blank">
-                      <img width="32" height="32" alt="Instagram icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-instagram-48.png">
-                    </a>
-                    <a href="https://x.com/QatrahGhaith" target="_blank">
-                      <img width="32" height="32" alt="X icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-twitter-48.png">
-                    </a>
-                    <a href="https://www.qatrah-ghaith.com/home" target="_blank">
-                      <img width="32" height="32" alt="Website icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-link-48.png">
-                    </a>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="footer" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
-                    <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </center>
+  <div class="content">
+    <h2>تم قبول طلب المحاضرة</h2>
+    <p>تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+    <p>التفاصيل:</p>
+    <ul>
+      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
+      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+      <li><strong>التاريخ:</strong> ${toISOStringSafe(lectureRequest.lectureDate)?.split('T')[0] || ''}</li>
+      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+    </ul>
+    <p>شكراً لمساهمتك!</p>
+  </div>
+  <div class="footer"><p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p></div>
 </body>
-</html>
-      `
-    });
+</html>`
+    }).catch(err => console.error('Email send error (accept):', err.message));
 
     console.log('Lecture request accepted successfully:', { requestId, userId: user._id });
 
@@ -472,154 +423,46 @@ router.post('/requests/reject/:id', authMiddleware, adminMiddleware, async (req,
     await session.commitTransaction();
     session.endSession();
 
-    // Send email to user
-    await sendEmail({
-      to: lectureRequest.userId.email,
-      subject: 'Lecture Request Rejected',
-      html: `
+    // Send email to user (non-blocking)
+    const userEmail = lectureRequest.userId?.email;
+    if (userEmail) {
+      sendEmail({
+        to: userEmail,
+        subject: 'Lecture Request Rejected',
+        html: `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f4f4;
-      margin: 0;
-      padding: 0;
-      direction: rtl;
-      text-align: right;
-    }
-    .container {
-      max-width: 660px;
-      margin: 0 auto;
-      background-color: #71a7b1;
-      border-radius: 8px;
-    }
-    .header {
-      padding: 12px 24px;
-      border-radius: 8px 8px 0 0;
-    }
-    .content {
-      padding: 24px;
-      background-color: #ffffff;
-      border-radius: 16px;
-      margin: 16px;
-      border: 2px solid #000000;
-      direction: rtl;
-      text-align: right;
-    }
-    h2 {
-      color: #333;
-      font-size: 24px;
-      margin: 0 0 16px;
-      text-align: right;
-    }
-    p {
-      color: #555;
-      font-size: 16px;
-      line-height: 1.6;
-      text-align: right;
-    }
-    ul {
-      list-style: none;
-      padding: 0;
-      margin: 16px 0;
-      direction: rtl;
-      text-align: right;
-    }
-    li {
-      margin-bottom: 12px;
-      font-size: 14px;
-      text-align: right;
-    }
-    .button {
-      display: inline-block;
-      padding: 10px 20px;
-      background-color: #007bff;
-      color: #ffffff;
-      text-decoration: none;
-      border-radius: 5px;
-      margin: 16px 0;
-    }
-    .social-icons {
-      text-align: center;
-      padding: 12px 0;
-    }
-    .social-icons a {
-      margin: 0 21px;
-      display: inline-block;
-    }
-    .footer {
-      background-color: #f4f4f4;
-      padding: 12px 16px;
-      font-size: 11px;
-      text-align: center;
-      color: #555;
-    }
-    img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 8px;
-    }
+    body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; direction: rtl; text-align: right; }
+    .content { padding: 24px; background-color: #ffffff; border-radius: 16px; margin: 16px; border: 2px solid #000000; }
+    h2 { color: #333; font-size: 24px; margin: 0 0 16px; }
+    p { color: #555; font-size: 16px; line-height: 1.6; }
+    ul { list-style: none; padding: 0; margin: 16px 0; }
+    li { margin-bottom: 12px; font-size: 14px; }
+    .footer { background-color: #f4f4f4; padding: 12px 16px; font-size: 11px; text-align: center; color: #555; }
   </style>
 </head>
 <body dir="rtl">
-  <center>
-    <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%" style="background-color:#f4f4f4; direction: rtl; text-align: right;">
-      <tbody>
-        <tr>
-          <td align="center" valign="top" dir="rtl">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:660px; direction: rtl; text-align: right;">
-              <tbody>
-
-                <tr>
-                  <td class="content" valign="top" dir="rtl" style="direction: rtl; text-align: right;">
-                    <h2 style="text-align: right;">تم رفض طلب المحاضرة</h2>
-                    <p style="text-align: right;">تم رفض محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
-                    ${note ? `<p style="text-align: right;">السبب: ${note}</p>` : ''}
-                    <p style="text-align: right;">التفاصيل:</p>
-                    <ul style="text-align: right;">
-                      <li style="text-align: right;"><strong>المادة:</strong> ${lectureRequest.subject}</li>
-                      <li style="text-align: right;"><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
-                      <li style="text-align: right;"><strong>التاريخ:</strong> ${lectureRequest.lectureDate.toISOString().split('T')[0]}</li>
-                      <li style="text-align: right;"><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
-                    </ul>
-                    <p style="text-align: right;">يرجى الاتصال بالإدارة لمزيد من التفاصيل.</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="social-icons" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
-                    <a href="https://www.facebook.com/share/g/1CkUqNAFsi/?mibextid=wwXIfr" target="_blank">
-                      <img width="32" height="32" alt="Facebook icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-facebook-48.png">
-                    </a>
-                    <a href="https://www.instagram.com/qatrah_ghaith?igsh=OGNvNDU1MGxpMWNs" target="_blank">
-                      <img width="32" height="32" alt="Instagram icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-instagram-48.png">
-                    </a>
-                    <a href="https://x.com/QatrahGhaith" target="_blank">
-                      <img width="32" height="32" alt="X icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-twitter-48.png">
-                    </a>
-                    <a href="https://www.qatrah-ghaith.com/home" target="_blank">
-                      <img width="32" height="32" alt="Website icon" src="https://cdn-images.mailchimp.com/icons/social-block-v2/light-link-48.png">
-                    </a>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="footer" valign="top" dir="rtl" style="direction: rtl; text-align: center;">
-                    <p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </center>
+  <div class="content">
+    <h2>تم رفض طلب المحاضرة</h2>
+    <p>تم رفض محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
+    ${note ? `<p>السبب: ${note}</p>` : ''}
+    <p>التفاصيل:</p>
+    <ul>
+      <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
+      <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
+      <li><strong>التاريخ:</strong> ${toISOStringSafe(lectureRequest.lectureDate)?.split('T')[0] || ''}</li>
+      <li><strong>المدة:</strong> ${lectureRequest.duration} ساعات</li>
+    </ul>
+    <p>يرجى الاتصال بالإدارة لمزيد من التفاصيل.</p>
+  </div>
+  <div class="footer"><p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p></div>
 </body>
-</html>
-      `
-    });
+</html>`
+      }).catch(err => console.error('Email send error (reject):', err.message));
+    }
 
     console.log('Lecture request rejected successfully:', { requestId });
 
@@ -660,7 +503,7 @@ router.delete('/requests/:id', authMiddleware, adminMiddleware, async (req, res)
   }
 });
 
-// Delete a lecture
+// Delete a lecture (admin only)
 router.delete('/:lectureId', authMiddleware, adminMiddleware, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -731,7 +574,6 @@ router.delete('/low-lecture-members/:id', authMiddleware, adminMiddleware, async
   try {
     const { id } = req.params;
 
-    // Validate ObjectId
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
       session.endSession();
@@ -742,7 +584,6 @@ router.delete('/low-lecture-members/:id', authMiddleware, adminMiddleware, async
       });
     }
 
-    // Calculate the previous week (Saturday to Friday) to align with GET endpoint
     const now = new Date();
     const dayOfWeek = now.getDay();
     let daysToPreviousSaturday = (dayOfWeek + 1) % 7;
@@ -761,21 +602,17 @@ router.delete('/low-lecture-members/:id', authMiddleware, adminMiddleware, async
 
     console.log('Attempting to find report for week:', { weekStart: weekStart.toISOString(), weekEnd: weekEnd.toISOString() });
 
-    // Find the report for the previous week
     let report = await LowLectureReport.findOne({ weekStart }).session(session);
 
-    // If no report exists, generate one
     if (!report) {
       console.log('No report found for previous week, generating new report:', { weekStart: weekStart.toISOString() });
       const result = await checkLowLectureMembers(false, session);
       console.log('Generated report result:', {
         success: result.success,
         message: result.message,
-        memberCount: result.members.length,
-        members: result.members.map(m => ({ _id: m._id, email: m.email }))
+        memberCount: result.members.length
       });
 
-      // Check if a report was created by checkLowLectureMembers
       report = await LowLectureReport.findOne({ weekStart }).session(session);
       if (!report || report.members.length === 0) {
         await session.abortTransaction();
@@ -788,11 +625,7 @@ router.delete('/low-lecture-members/:id', authMiddleware, adminMiddleware, async
       }
     }
 
-    // Check if the member exists in the report
     const initialLength = report.members.length;
-    const memberExists = report.members.some(member => member._id.toString() === id);
-    console.log('Checking if member exists in report:', { memberId: id, exists: memberExists });
-
     report.members = report.members.filter(member => member._id.toString() !== id);
 
     if (report.members.length === initialLength) {
@@ -805,74 +638,25 @@ router.delete('/low-lecture-members/:id', authMiddleware, adminMiddleware, async
       });
     }
 
-    // Update membersWithLowLectures count
     report.membersWithLowLectures = report.members.length;
-
-    // Save the updated report
     await report.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
-    console.log(`Member ${id} successfully removed from LowLectureReport for week starting ${weekStart.toISOString()}`);
+    console.log(`Member ${id} successfully removed from LowLectureReport`);
     return res.status(200).json({
       success: true,
-      message: 'Member successfully removed from this week’s low lecture report'
+      message: 'Member successfully removed from this week\'s low lecture report'
     });
   } catch (error) {
-    if (error.code === 11000 && error.keyPattern && error.keyPattern.weekStart) {
-      console.warn('Duplicate key error for weekStart, fetching existing report:', { weekStart: weekStart.toISOString() });
-      // Fetch existing report instead of creating a new one
-      const report = await LowLectureReport.findOne({ weekStart }).session(session);
-      if (!report || report.members.length === 0) {
-        await session.abortTransaction();
-        session.endSession();
-        console.warn('No members with low lectures found in existing report:', { weekStart, weekEnd });
-        return res.status(404).json({
-          success: false,
-          message: 'No members with low lecture counts found for the specified week'
-        });
-      }
-
-      // Check if the member exists in the report
-      const initialLength = report.members.length;
-      const memberExists = report.members.some(member => member._id.toString() === id);
-      console.log('Checking if member exists in report:', { memberId: id, exists: memberExists });
-
-      report.members = report.members.filter(member => member._id.toString() !== id);
-
-      if (report.members.length === initialLength) {
-        await session.abortTransaction();
-        session.endSession();
-        console.error('Member not found in low lecture report:', { memberId: id });
-        return res.status(404).json({
-          success: false,
-          message: 'Member not found in low lecture report'
-        });
-      }
-
-      // Update membersWithLowLectures count
-      report.membersWithLowLectures = report.members.length;
-
-      // Save the updated report
-      await report.save({ session });
-
-      await session.commitTransaction();
-      session.endSession();
-
-      console.log(`Member ${id} successfully removed from LowLectureReport for week starting ${weekStart.toISOString()}`);
-      return res.status(200).json({
-        success: true,
-        message: 'Member successfully removed from this week’s low lecture report'
-      });
-    }
-
     console.error('Error removing member from LowLectureReport:', {
       memberId: req.params.id,
-      error: error.message,
-      stack: error.stack
+      error: error.message
     });
-    await session.abortTransaction();
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
     session.endSession();
     return res.status(500).json({
       success: false,
@@ -887,7 +671,6 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    // Calculate the previous week (Saturday to Friday)
     const now = new Date();
     const dayOfWeek = now.getDay();
     let daysToPreviousSaturday = (dayOfWeek + 1) % 7;
@@ -895,7 +678,7 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
 
     const previousSaturday = new Date(now);
     previousSaturday.setDate(now.getDate() - daysToPreviousSaturday);
-    
+
     const weekStart = new Date(previousSaturday);
     weekStart.setDate(previousSaturday.getDate() - 7);
     weekStart.setHours(0, 0, 0, 0);
@@ -906,7 +689,6 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
 
     console.log('Fetching report for week:', { weekStart: weekStart.toISOString(), weekEnd: weekEnd.toISOString() });
 
-    // Find the latest report for the previous week
     let report = await LowLectureReport.findOne({ weekStart })
       .sort({ createdAt: -1 })
       .session(session);
@@ -917,11 +699,9 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
       console.log('Generated report result:', {
         success: result.success,
         message: result.message,
-        memberCount: result.members.length,
-        members: result.members.map(m => ({ _id: m._id, email: m.email }))
+        memberCount: result.members.length
       });
 
-      // Check if a report was created
       report = await LowLectureReport.findOne({ weekStart }).session(session);
       if (!report) {
         await session.commitTransaction();
@@ -946,7 +726,7 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
 
     return res.json({
       success: true,
-      message: report.members.length > 0 
+      message: report.members.length > 0
         ? `Found ${report.members.length} members with low lecture counts`
         : 'All members meet the minimum weekly lecture requirements',
       members: report.members,
@@ -959,7 +739,9 @@ router.get('/low-lecture-members', authMiddleware, adminMiddleware, async (req, 
     });
   } catch (error) {
     console.error('Error in low-lecture-members:', error.message, error.stack);
-    await session.abortTransaction();
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
     session.endSession();
     res.status(500).json({
       success: false,
@@ -976,10 +758,9 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
   try {
     const users = await User.find({ role: 'user' }).session(localSession);
     console.log('📊 Found users with role "user":', users.length);
-    
+
     const lowLectureMembers = [];
-    
-    // Calculate the previous week: Saturday to Friday
+
     const now = new Date();
     const dayOfWeek = now.getDay();
     let daysToPreviousSaturday = (dayOfWeek + 1) % 7;
@@ -987,11 +768,11 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
 
     const previousSaturday = new Date(now);
     previousSaturday.setDate(now.getDate() - daysToPreviousSaturday);
-    
+
     const weekStart = new Date(previousSaturday);
     weekStart.setDate(previousSaturday.getDate() - 7);
     weekStart.setHours(0, 0, 0, 0);
-    
+
     const weekEnd = new Date(previousSaturday);
     weekEnd.setDate(previousSaturday.getDate() - 1);
     weekEnd.setHours(23, 59, 59, 999);
@@ -1001,10 +782,9 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
     for (const user of users) {
       console.log('👤 Processing user:', { userId: user._id.toString(), email: user.email });
 
-      // Check if user has approved join request
-      const joinRequest = await JoinRequest.findOne({ 
-        email: user.email.toLowerCase().trim(), 
-        status: 'Approved' 
+      const joinRequest = await JoinRequest.findOne({
+        email: user.email.toLowerCase().trim(),
+        status: 'Approved'
       }).session(localSession);
       if (!joinRequest) {
         console.log('⏩ Skipping user - No approved join request:', { userId: user._id.toString(), email: user.email });
@@ -1016,7 +796,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
         continue;
       }
 
-      // Ensure students array exists and is valid
       if (!Array.isArray(user.students) || user.students.length === 0) {
         console.log('⏩ Skipping user - No students:', { userId: user._id.toString(), email: user.email });
         if (isCronJob && user.lowLectureWeekCount > 0) {
@@ -1030,15 +809,7 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
       console.log('👥 User has students:', user.students.length);
       const userUnderTargetStudents = [];
 
-      // Process each student
       for (const student of user.students) {
-        console.log(`🎓 Processing student:`, {
-          studentEmail: student.email,
-          studentName: student.name,
-          hasSubjects: Array.isArray(student.subjects)
-        });
-
-        // Ensure subjects array exists
         if (!Array.isArray(student.subjects) || student.subjects.length === 0) {
           console.log('⚠️ Student has no subjects:', { studentEmail: student.email });
           continue;
@@ -1046,18 +817,9 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
 
         const studentUnderTargetSubjects = [];
 
-        // Process each subject for this student
         for (const subject of student.subjects) {
-          console.log(`📚 Processing subject:`, {
-            subjectName: subject.name,
-            minLectures: subject.minLectures,
-            studentEmail: student.email
-          });
-
-          // Ensure lectures array exists
           if (!Array.isArray(user.lectures)) user.lectures = [];
 
-          // Count lectures for this student and subject in the last week
           const lectureCount = user.lectures.filter(lecture => {
             const lectureTime = lecture.lectureDate || lecture.createdAt;
             const matchesTimeFrame = lectureTime >= weekStart && lectureTime <= weekEnd;
@@ -1066,13 +828,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
             return matchesTimeFrame && matchesStudent && matchesSubject;
           }).length;
 
-          console.log(`📊 Lecture count for ${student.name} in ${subject.name}:`, {
-            delivered: lectureCount,
-            required: subject.minLectures,
-            isUnderTarget: lectureCount < subject.minLectures
-          });
-
-          // If lectures are below minimum requirement
           if (lectureCount < subject.minLectures) {
             studentUnderTargetSubjects.push({
               name: subject.name,
@@ -1080,7 +835,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
               deliveredLectures: lectureCount
             });
 
-            // Create notification if it doesn't exist (only in cron job)
             if (isCronJob) {
               const notificationExists = await Notification.findOne({
                 userId: user._id,
@@ -1090,14 +844,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
               }).session(localSession);
 
               if (!notificationExists) {
-                console.log('🔔 Creating notification for low lecture count:', {
-                  userId: user._id.toString(),
-                  studentEmail: student.email,
-                  subject: subject.name,
-                  delivered: lectureCount,
-                  required: subject.minLectures
-                });
-                
                 const notification = new Notification({
                   userId: user._id,
                   message: `Weekly lectures for student ${student.name} in subject ${subject.name} are below the minimum (${lectureCount}/${subject.minLectures})`,
@@ -1115,7 +861,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
           }
         }
 
-        // If this student has subjects under target
         if (studentUnderTargetSubjects.length > 0) {
           userUnderTargetStudents.push({
             studentName: student.name || 'Name not available',
@@ -1126,18 +871,15 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
         }
       }
 
-      // If this user has students with under-target subjects
       if (userUnderTargetStudents.length > 0) {
         console.log(`Adding user ${user.email} to low lecture members with ${userUnderTargetStudents.length} students`);
-        
-        // Increment counter only in cron job and if not already counted for this week
+
         if (isCronJob && (!user.lastLowLectureWeek || user.lastLowLectureWeek < weekStart)) {
           user.lowLectureWeekCount = (user.lowLectureWeekCount || 0) + 1;
           user.lastLowLectureWeek = weekStart;
           await user.save({ session: localSession });
-          console.log(`Incremented lowLectureWeekCount for ${user.email}: ${user.lowLectureWeekCount}`);
         }
-        
+
         lowLectureMembers.push({
           _id: user._id.toString(),
           name: joinRequest.name || user.email,
@@ -1145,13 +887,13 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
           lowLectureWeekCount: user.lowLectureWeekCount,
           underTargetStudents: userUnderTargetStudents,
           lectures: user.lectures.map(lecture => ({
-            _id: lecture._id.toString(),
+            _id: lecture._id ? lecture._id.toString() : '',
             name: lecture.name,
             subject: lecture.subject,
             studentEmail: lecture.studentEmail,
             link: lecture.link,
-            createdAt: lecture.createdAt.toISOString(),
-            lectureDate: (lecture.lectureDate || lecture.createdAt).toISOString(),
+            createdAt: toISOStringSafe(lecture.createdAt),
+            lectureDate: toISOStringSafe(lecture.lectureDate || lecture.createdAt),
             duration: lecture.duration || 1
           }))
         });
@@ -1161,7 +903,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
           user.lowLectureWeekCount = 0;
           user.lastLowLectureWeek = null;
           await user.save({ session: localSession });
-          console.log(`Reset lowLectureWeekCount for ${user.email} to 0`);
         }
       }
     }
@@ -1179,7 +920,7 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
       console.log('Saved low lecture report:', { weekStart: weekStart.toISOString(), members: lowLectureMembers.length });
     } catch (error) {
       if (error.code === 11000 && error.keyPattern && error.keyPattern.weekStart) {
-        console.warn('Duplicate key error in checkLowLectureMembers, updating existing report:', { weekStart: weekStart.toISOString() });
+        console.warn('Duplicate key error in checkLowLectureMembers, updating existing report');
         await LowLectureReport.updateOne(
           { weekStart },
           {
@@ -1193,7 +934,6 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
           },
           { session: localSession }
         );
-        console.log('Updated existing low lecture report:', { weekStart: weekStart.toISOString(), members: lowLectureMembers.length });
       } else {
         throw error;
       }
@@ -1205,10 +945,10 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
     }
 
     console.log(`Final results: ${lowLectureMembers.length} members with low lecture counts`);
-    
+
     return {
       success: true,
-      message: lowLectureMembers.length > 0 
+      message: lowLectureMembers.length > 0
         ? `Found ${lowLectureMembers.length} members with low lecture counts`
         : 'All members meet the minimum weekly lecture requirements',
       members: lowLectureMembers,
@@ -1222,7 +962,9 @@ async function checkLowLectureMembers(isCronJob = false, session = null) {
   } catch (error) {
     console.error('Error in checkLowLectureMembers:', error.message, error.stack);
     if (!session) {
-      await localSession.abortTransaction();
+      try {
+        await localSession.abortTransaction();
+      } catch (_) {}
       localSession.endSession();
     }
     throw error;
@@ -1250,7 +992,7 @@ router.get('/notifications', authMiddleware, async (req, res) => {
         },
         message: notification.message,
         type: notification.type,
-        createdAt: notification.createdAt.toISOString(),
+        createdAt: toISOStringSafe(notification.createdAt),
         read: notification.read,
         lectureDetails: notification.lectureDetails
       }))
@@ -1291,7 +1033,7 @@ router.post('/notifications/mark-read', authMiddleware, async (req, res) => {
         },
         message: notification.message,
         type: notification.type,
-        createdAt: notification.createdAt.toISOString(),
+        createdAt: toISOStringSafe(notification.createdAt),
         read: notification.read,
         lectureDetails: notification.lectureDetails
       }))

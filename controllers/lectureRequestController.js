@@ -14,6 +14,9 @@ export const uploadLectureRequest = async (req, res) => {
       return res.status(400).json({ message: 'جميع الحقول (العنوان، الوصف، اسم المنشئ، المادة، الفصل الدراسي، الدولة، المرحلة الدراسية) مطلوبة' });
     }
 
+    // Decode filename from latin1 to UTF-8 to correctly handle Arabic filenames
+    const fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
+
     const lectureRequest = new LectureRequest({
       title,
       description,
@@ -23,7 +26,7 @@ export const uploadLectureRequest = async (req, res) => {
       country,
       academicLevel,
       fileData: req.file.buffer,
-      fileName: req.file.originalname,
+      fileName: fileName,
       mimeType: req.file.mimetype,
       uploadedBy: req.userId,
       status: 'pending'
@@ -178,9 +181,13 @@ export const getLectureFile = async (req, res) => {
       return res.status(400).json({ message: 'الملف ليس بصيغة PDF' });
     }
 
+    // RFC 5987 encoding: supports Arabic and all Unicode filenames correctly
+    const encodedFileName = encodeURIComponent(lectureRequest.fileName).replace(/'/g, '%27');
+
     res.set({
       'Content-Type': lectureRequest.mimeType,
-      'Content-Disposition': `inline; filename="${lectureRequest.fileName}"`,
+      // fallback ASCII name + RFC 5987 UTF-8 name for full browser support
+      'Content-Disposition': `inline; filename="file.pdf"; filename*=UTF-8''${encodedFileName}`
     });
 
     res.send(lectureRequest.fileData);
