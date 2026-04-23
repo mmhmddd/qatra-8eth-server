@@ -1,5 +1,5 @@
 // controllers/newsController.js
-import News from '../models/News.js';
+import News from '../models/news.js';
 
 // ─── GET active news (public) ───────────────────────────────────────────────
 export const getNews = async (req, res) => {
