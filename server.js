@@ -22,6 +22,7 @@ import galleryRoutes from './routes/gallery.js';
 import lectureRequestRoutes from './routes/lectureRequestRoutes.js';
 import forgetPasswordRoutes from './routes/forgotPassword.js';
 import messageRoutes from './routes/messageRoutes.js';
+import newsRoutes from './routes/news.js';
 
 process.env.TZ = 'Africa/Cairo';
 config();
@@ -298,8 +299,9 @@ app.use('/api/lecture-requests',  lectureRequestRoutes);
 app.use('/api/forgot-password',   forgetPasswordRoutes);
 app.use('/api/reset-password',    forgetPasswordRoutes);
 app.use('/api/messages',          messageRoutes);
+app.use('/api/news',              newsRoutes);
 
-console.log('✅ All routes registered');
+console.log(' All routes registered');
 
 // Deprecated uploads path
 app.get('/api/Uploads/*', (req, res) => {
