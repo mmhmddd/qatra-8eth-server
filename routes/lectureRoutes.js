@@ -264,7 +264,9 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       return res.status(400).json({ message: 'Invalid request ID' });
     }
 
-    const lectureRequest = await DriveLectureRequest.findById(requestId).populate('userId', 'email').session(session);
+    const lectureRequest = await DriveLectureRequest.findById(requestId)
+      .populate('userId', 'email')
+      .session(session);
     if (!lectureRequest || lectureRequest.status !== 'pending') {
       await session.abortTransaction();
       session.endSession();
@@ -292,10 +294,8 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       return res.status(404).json({ message: 'Join request not found' });
     }
 
-    // Initialize lectures array if undefined
     if (!Array.isArray(user.lectures)) user.lectures = [];
 
-    // Create lecture
     const lecture = {
       link: lectureRequest.link,
       name: lectureRequest.name,
@@ -306,10 +306,12 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       duration: lectureRequest.duration
     };
     user.lectures.push(lecture);
-    user.lectureCount = (user.lectureCount || 0) + 1;
+
+    // ✅ FIX: Always derive from array length — never trust the stale counter
+    user.lectureCount = user.lectures.length;
+
     joinRequest.volunteerHours = (joinRequest.volunteerHours || 0) + 1;
 
-    // Delete related low lecture count notifications
     await Notification.deleteMany(
       {
         userId: user._id,
@@ -320,50 +322,49 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
       { session }
     );
 
-    // Create notification
     const notification = new Notification({
       userId: user._id,
       message: `New lecture added by ${user.email}: ${lectureRequest.name} (${lectureRequest.subject}) - ${lectureRequest.link}`,
       type: 'lecture_added',
-      lectureDetails: { link: lectureRequest.link, name: lectureRequest.name, subject: lectureRequest.subject, studentEmail: normalizedStudentEmail }
+      lectureDetails: {
+        link: lectureRequest.link,
+        name: lectureRequest.name,
+        subject: lectureRequest.subject,
+        studentEmail: normalizedStudentEmail
+      }
     });
     await notification.save({ session });
 
-    // Update request status
     lectureRequest.status = 'accepted';
     lectureRequest.adminActionAt = new Date();
-    await lectureRequest.save({ session });
 
-    // Save changes
-    await Promise.all([user.save({ session }), joinRequest.save({ session })]);
+    // ✅ Save all three documents together — single Promise.all, no split saves
+    await Promise.all([
+      user.save({ session }),
+      joinRequest.save({ session }),
+      lectureRequest.save({ session })
+    ]);
 
     await session.commitTransaction();
     session.endSession();
 
-    // Send email to user (non-blocking)
     sendEmail({
       to: user.email,
       subject: 'Lecture Request Accepted',
       html: `
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; direction: rtl; text-align: right; }
-    .content { padding: 24px; background-color: #ffffff; border-radius: 16px; margin: 16px; border: 2px solid #000000; }
-    h2 { color: #333; font-size: 24px; margin: 0 0 16px; }
-    p { color: #555; font-size: 16px; line-height: 1.6; }
-    ul { list-style: none; padding: 0; margin: 16px 0; }
-    li { margin-bottom: 12px; font-size: 14px; }
-    .footer { background-color: #f4f4f4; padding: 12px 16px; font-size: 11px; text-align: center; color: #555; }
-  </style>
-</head>
+<head><meta charset="UTF-8"><style>
+  body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0;direction:rtl;text-align:right}
+  .content{padding:24px;background:#fff;border-radius:16px;margin:16px;border:2px solid #000}
+  h2{color:#333;font-size:24px;margin:0 0 16px}p{color:#555;font-size:16px;line-height:1.6}
+  ul{list-style:none;padding:0;margin:16px 0}li{margin-bottom:12px;font-size:14px}
+  .footer{background:#f4f4f4;padding:12px 16px;font-size:11px;text-align:center;color:#555}
+</style></head>
 <body dir="rtl">
   <div class="content">
     <h2>تم قبول طلب المحاضرة</h2>
     <p>تم قبول محاضرتك "${lectureRequest.name}" من قبل الإدارة.</p>
-    <p>التفاصيل:</p>
     <ul>
       <li><strong>المادة:</strong> ${lectureRequest.subject}</li>
       <li><strong>بريد الطالب:</strong> ${lectureRequest.studentEmail}</li>
@@ -373,11 +374,10 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
     <p>شكراً لمساهمتك!</p>
   </div>
   <div class="footer"><p>© 2025 جميع الحقوق محفوظة: قطرة غيث</p></div>
-</body>
-</html>`
+</body></html>`
     }).catch(err => console.error('Email send error (accept):', err.message));
 
-    console.log('Lecture request accepted successfully:', { requestId, userId: user._id });
+    console.log('Lecture request accepted:', { requestId, userId: user._id, lectureCount: user.lectureCount });
 
     res.json({
       success: true,
@@ -388,7 +388,7 @@ router.post('/requests/accept/:id', authMiddleware, adminMiddleware, async (req,
     });
   } catch (error) {
     console.error('Error accepting lecture request:', error.message);
-    await session.abortTransaction();
+    try { await session.abortTransaction(); } catch (_) {}
     session.endSession();
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }

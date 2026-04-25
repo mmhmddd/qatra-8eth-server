@@ -639,8 +639,15 @@ router.get('/profile', authMiddleware, async (req, res) => {
       logger.dbAnomaly({ type: 'USER_WITHOUT_JOIN_REQUEST', details: { userId: user._id, email: user.email }, severity: 'HIGH' });
     }
 
-    // ✅ Purge expired messages safely in application code
     await purgeExpiredMessages(user);
+
+    // ✅ FIX: Always derive lectureCount from the actual array length
+    // This self-heals any historical drift between the counter and the array
+    const actualLectureCount = user.lectures.length;
+    if (user.lectureCount !== actualLectureCount) {
+      user.lectureCount = actualLectureCount;
+      await user.save();
+    }
 
     const lecturesWithStudentNames = user.lectures.map(lecture => ({
       ...lecture.toObject(),
@@ -648,10 +655,33 @@ router.get('/profile', authMiddleware, async (req, res) => {
     }));
 
     res.json({
-      success: true, message: 'تم جلب الملف الشخصي بنجاح',
+      success: true,
+      message: 'تم جلب الملف الشخصي بنجاح',
       data: {
-        user: { id: user._id, email: user.email, profileImage: user.profileImage || null, numberOfStudents: user.numberOfStudents || 0, subjects: user.subjects || [], students: user.students || [], meetings: user.meetings || [], lectures: lecturesWithStudentNames, lectureCount: user.lectureCount || 0, messages: user.messages || [] },
-        joinRequest: joinRequest ? { name: joinRequest.name, phone: joinRequest.number, academicSpecialization: joinRequest.academicSpecialization, address: joinRequest.address, volunteerHours: joinRequest.volunteerHours || 0, status: joinRequest.status, students: joinRequest.students || [], subjects: joinRequest.subjects || [], lectures: lecturesWithStudentNames, lectureCount: user.lectureCount || 0 } : null
+        user: {
+          id: user._id,
+          email: user.email,
+          profileImage: user.profileImage || null,
+          numberOfStudents: user.numberOfStudents || 0,
+          subjects: user.subjects || [],
+          students: user.students || [],
+          meetings: user.meetings || [],
+          lectures: lecturesWithStudentNames,
+          lectureCount: actualLectureCount,  // ✅ use the derived value
+          messages: user.messages || []
+        },
+        joinRequest: joinRequest ? {
+          name: joinRequest.name,
+          phone: joinRequest.number,
+          academicSpecialization: joinRequest.academicSpecialization,
+          address: joinRequest.address,
+          volunteerHours: joinRequest.volunteerHours || 0,
+          status: joinRequest.status,
+          students: joinRequest.students || [],
+          subjects: joinRequest.subjects || [],
+          lectures: lecturesWithStudentNames,
+          lectureCount: actualLectureCount  // ✅ use the derived value here too
+        } : null
       }
     });
   } catch (error) {
